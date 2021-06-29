@@ -1,0 +1,10 @@
+.vscode/
+tests/
+run/
+__pycache__/
+pywp/potential/*.py
+!pywp/potential/test.py
+!pywp/potential/__init__.py
+*.dat
+*.trj
+*.meta
