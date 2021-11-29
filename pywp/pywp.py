@@ -199,9 +199,9 @@ def propagate(Psi, H, KE, TU, VU, VUhalf, R, K, dA, dK, dt, nstep, output_step, 
                     abspsi = abs2(Psi[index_along(Psi, j, -1)]) * pf
                     
                     abspsip = abs2(_backend.fft.fftn(Psi[index_along(Psi, j, -1)] * pf, axes=tuple(range(nk))))
-                    Rhoave.append(_backend.sum(abspsi) * dA)
-                    Rave += [_backend.sum(abspsi*R_) * dA / Rhoave[-1] for R_ in R]
-                    Pave += [_backend.sum(abspsip*K_) * dK / Rhoave[-1] for K_ in K]
+                    Rhoave.append(_backend.sum(abspsi).get() * dA)
+                    Rave += [_backend.sum(abspsi*R_).get() * dA / Rhoave[-1] for R_ in R]
+                    Pave += [_backend.sum(abspsip*K_).get() * dK / Rhoave[-1] for K_ in K]
 
             Rhotot = _backend.sum(abs2(Psi)) * dA
             KEave = sum((_backend.sum(abs2(Psip_) * KE) * dK for Psip_ in Psip))

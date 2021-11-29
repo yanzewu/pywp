@@ -28,6 +28,7 @@ def main():
     parser.add_argument('--dt', help='time step', type=float, required=True)
     parser.add_argument('--output_step', help='output step', type=int, default=1000)
     parser.add_argument('--checkend', help='check end', default=True, type=lambda x:x.lower() == 'true', nargs='?', const=True)
+    parser.add_argument('--rtol', help='checkend rtol', type=float, default=0.05)
     parser.add_argument('--traj', help='trajectory filename', default='')
     parser.add_argument('--output', help='output level', type=int, default=1)
     parser.add_argument('--gpu', help='using gpu', default=False, type=lambda x:x.lower() == 'true', nargs='?', const=True)
@@ -46,11 +47,11 @@ def main():
 
     preproc_args = pywp.preprocess(
         pot,
-        [args.M, args.My] if args.My else args.M,
-        [args.L, args.Ly] if args.Ly else args.L,
-        [args.sigma_x, args.sigma_y] if args.sigma_y else [args.sigma_x],
-        [args.init_x, args.init_y] if args.init_y else [args.init_x],
-        [args.init_px, args.init_py] if args.init_py else [args.init_px],
+        [args.M, args.My] if args.My is not None else args.M,
+        [args.L, args.Ly] if args.Ly is not None else args.L,
+        [args.sigma_x, args.sigma_y] if args.sigma_y is not None else [args.sigma_x],
+        [args.init_x, args.init_y] if args.init_y is not None else [args.init_x],
+        [args.init_px, args.init_py] if args.init_py is not None else [args.init_px],
         args.init_s,
         args.mass,
         args.dt,
@@ -67,6 +68,7 @@ def main():
         boundary=boundary,
         verbose=args.output,
         cuda_backend=args.gpu,
+        checkend_rtol=args.rtol,
     )
 
     if trajfile:
