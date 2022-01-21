@@ -1,0 +1,130 @@
+
+from ast import parse
+import sys
+import argparse
+import numpy as np
+
+from . import preprocess, propagate, potential
+
+class Application:
+
+    def __init__(self, pottype, partitioner=None, partition_titles=None, boundary=None):
+        """ pottype: class name of the potential.
+            partitioner: list[list[array[float]]->array[bool]] boolean map of position meshgrids. 
+            partition_titles: Names of each partition.
+            boundary: list[array[float]]->array[bool] boolean map of position meshgrids.
+        """
+        self.pottype = pottype
+        if not partitioner:
+            self.partitioner = [lambda _: 1, lambda x:x[0] >= 0, lambda x:x[0] < 0]
+            self.partition_titles = ['P', 'T', 'R']
+        else:
+            self.partitioner = partitioner
+            self.partition_titles = partition_titles
+
+        self.boundary = boundary
+
+    def parse_args(self):
+
+        parsefloatlist = lambda s: [float(x) for x in s.split(',')]
+        parseintlist = lambda s: [int(x) for x in s.split(',')]
+
+        parser = argparse.ArgumentParser('Wavepacket simulator')
+        parser.add_argument('-L', '--L', help='box size', type=float)
+        parser.add_argument('--Ly', help='box size',  type=float)
+        parser.add_argument('--box', help='box size multiple dimensional', type=parsefloatlist)
+        parser.add_argument('-M', '--M', help='grid number', type=int)
+        parser.add_argument('--My', help='grid number', type=int)
+        parser.add_argument('--grid', help='grid number multiple dimensional', type=parseintlist)
+        parser.add_argument('--mass', help='mass', type=int, required=True)
+        parser.add_argument('--init_x', help='init x', type=float, required=True)
+        parser.add_argument('--init_y', help='init y', type=float, required=True)
+        parser.add_argument('--init_r', help='init position', type=parsefloatlist)
+        parser.add_argument('--sigma_x', help='sigma x', type=float, required=True)
+        parser.add_argument('--sigma_y', help='sigma y', type=float)
+        parser.add_argument('--sigma', help='standard deviation of wavepacket', type=parsefloatlist)
+        parser.add_argument('--init_px', help='init px', type=float, required=True)
+        parser.add_argument('--init_py', help='init py', type=float)
+        parser.add_argument('--init_p', help='init momentum', type=parsefloatlist)
+        parser.add_argument('--init_s', help='init surface', type=int, required=True)
+        parser.add_argument('--xwall_left', help='left boundary', type=float, default=-0.9)
+        parser.add_argument('--xwall_right', help='right boundary', type=float, default=0.9)
+        parser.add_argument('--potential_params', help='potential_params', default='')
+        parser.add_argument('--Nstep', help='# step', type=int, required=True)
+        parser.add_argument('--dt', help='time step', type=float, required=True)
+        parser.add_argument('--output_step', help='output step', type=int, default=1000)
+        parser.add_argument('--checkend', help='check end', default=True, type=lambda x:x.lower() == 'true', nargs='?', const=True)
+        parser.add_argument('--rtol', help='checkend rtol', type=float, default=0.05)
+        parser.add_argument('--traj', help='trajectory filename', default='')
+        parser.add_argument('--output', help='output level', type=int, default=1)
+        parser.add_argument('--gpu', help='using gpu', default=False, type=lambda x:x.lower() == 'true', nargs='?', const=True)
+
+        if self.pottype is None:
+            parser.add_argument('--potential', help='name of potential', default='test.Tully1')
+
+        self.args = parser.parse_args(sys.argv[1:])
+
+    def run(self):
+
+        def get_multidim_arg(args, argname, argname1d, argname2d, dim):
+            if getattr(args, argname) is not None:
+                return getattr(args, argname)
+            else:
+                if dim == 1:
+                    return [getattr(args, argname1d)]
+                elif dim == 2:
+                    arg2d = getattr(args, argname2d)
+                    if arg2d:
+                        return [getattr(args, argname1d), arg2d]
+                    else:
+                        return [getattr(args, argname1d), getattr(args, argname1d)]
+                else:
+                    raise RuntimeError('argument %s not found' % argname)
+
+        args = self.args
+        trajfile = open(args.traj, 'w') if args.traj else None
+        if not self.boundary:
+            self.boundary = lambda x: np.logical_and(x[0] > args.xwall_left*args.L/2, x[0] < args.xwall_right*args.L/2)
+
+        if self.pottype is None:
+            self.pottype = potential.get_potential(args.potential)
+
+        pot = self.pottype(*[float(v) for v in args.potential_params.split(',')]) if args.potential_params else self.pottype()
+        box = get_multidim_arg(args, 'box', 'L', 'Ly', pot.get_kdim())
+        grid = get_multidim_arg(args, 'grid', 'M', 'My', pot.get_kdim())
+        sigma = get_multidim_arg(args, 'sigma', 'sigma_x', 'sigma_y', pot.get_kdim())
+        init_r = get_multidim_arg(args, 'init_r', 'init_x', 'init_y', pot.get_kdim())
+        init_p = get_multidim_arg(args, 'init_p', 'init_px', 'init_py', pot.get_kdim())
+
+        preproc_args = preprocess(pot, grid, box, sigma, init_r, init_p, args.init_s, args.mass, args.dt)
+
+        result = propagate(
+            preproc_args,
+            nstep=args.Nstep,
+            output_step=args.output_step,
+            partitioner=self.partitioner,
+            partition_titles=self.partition_titles,
+            trajfile=trajfile,
+            checkend=args.checkend,
+            boundary=self.boundary,
+            verbose=args.output,
+            cuda_backend=args.gpu,
+            checkend_rtol=args.rtol,
+        )
+
+        if trajfile:
+            trajfile.close()
+
+            if pot.get_kdim() == 2:
+                with open(args.traj + '.meta', 'w') as f:
+                    f.write('-L %f -Ly %f -N %d -Ny %d -n %d -dt %f -step %d' % (
+                        box[0], box[1], grid[0], grid[1],
+                        pot.get_dim()*2, args.dt*args.output_step,
+                        len(result)))
+            else:
+                with open(args.traj + '.meta', 'w') as f:
+                    f.write('-L %f -N %d -n %d -dt %f -step %d' % (
+                        ','.join((str(x) for x in box)),
+                        ','.join((str(x) for x in grid)),
+                        pot.get_dim()*2, args.dt*args.output_step,
+                        len(result)))

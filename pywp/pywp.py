@@ -18,18 +18,36 @@ def index_along2(arr, ind1, axis1, ind2, axis2):
     return tuple(indexer)
 
 
-def preprocess(potential:Potential, N, L, sigma, R0, P0, n0, M, dt):
-    """ Produce things needed for propatate().
-
-    potential: class compatible with potential.Potential.
-    N: grid. either a number, or list of numbers. len(N) must = potential->kdim()
-    L: box length. number/list of numbers.
-    sigma: array-like. initial wavepacket amplitude will be exp(-R^2/sigma^2)
-    R0/P0: array-like.
-    n0: int. the surface.
-    M: mass
+class PhysicalParameter:
+    """ Represents the physical parameters that to use.
     """
-    # NOTE currently we only support 2D
+    def __init__(self, Psi, H, KE, TU, VU, VUhalf, R, K, dA:float, dK:float, dt:float):
+        self.Psi = Psi
+        self.H = H
+        self.KE = KE
+        self.TU = TU
+        self.VU = VU
+        self.VUhalf = VUhalf
+        self.R = R
+        self.K = K
+        self.dA = dA
+        self.dK = dK
+        self.dt = dt
+
+
+def preprocess(potential:Potential, N, L, sigma, R0, P0, n0:int, M:float, dt:float) -> PhysicalParameter:
+    """ Produce things needed for propatate(). Only two electronic states (potential.dim() == 2) are supported currently.
+
+    potential: Class compatible with potential.Potential.
+    N: grid. Either a number, or list of numbers, where len(N) must = potential.get_kdim().
+    L: box length. Number/list of numbers. The allocated grid will be [-L/2, L/2].
+    sigma: array-like. length equals to potential.get_kdim(). The initial wavepacket amplitude will be exp(-R^2/sigma^2)
+    R0/P0: array-like. length equals to potential.get_kdim().
+    n0: int. Initial surface.
+    M: mass.
+    dt: timestep.
+    """
+    # NOTE currently we only support 2 states
 
     nel = potential.get_dim()
     nk = potential.get_kdim()
@@ -108,26 +126,35 @@ def preprocess(potential:Potential, N, L, sigma, R0, P0, n0, M, dt):
     #VUhalf = np.zeros(H.shape, dtype=complex)
     #VUhalf[:,:,0,0] = np.exp(-1j*dt/2*H[:,:,0,0])
 
-    return Psi, H, KE, TU, VU, VUhalf, R, K, dA, dK, dt
+    return PhysicalParameter(Psi, H, KE, TU, VU, VUhalf, R, K, dA, dK, dt)
 
 
-def propagate(Psi, H, KE, TU, VU, VUhalf, R, K, dA, dK, dt, nstep, output_step, partitioner=None, partition_titles=None, trajfile=None, checkend=False, boundary=None, checkend_rtol=0.05, verbose=True, cuda_backend=False):
+def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=None, partition_titles=None, trajfile=None, checkend=False, boundary=None, checkend_rtol=0.05, verbose=True, cuda_backend=False) -> list:
     """ The actual propagating function.
-    partitioner: List of functions which will be called by p(R), where R is position meshgrid, list with potential.dim() element of size N x N ...
+    Args:
+   
+    - nstep: Maximum number of steps.
+    - output_step: Step to output info and save result.
+    - partitioner: None/list[list[array[float]]->array[bool]]. Each of the functions will be called by p(R), where R is position meshgrid, list with potential.dim() element of size N x N ...
         it should return a boolean map (with size N x N ...). If None, a unit partitioner is used (just a number 1).
-    partition_titles: List of string for verbose output.
-    trajfile: If not None, will write wavefunction (on both position and momentum basis) to the file, ordered by electronic state. 
+    - partition_titles: list[str]. Titles for verbose output.
+    - trajfile: None/file-like. Will write wavefunction (on both position and momentum basis) to the file, ordered by electronic state. 
         All positions first, followed by momentums.
-    checkend: If true, then call boundary(R) => bool map (where trajectory is in boundary).
-        if the probability outside boundary is > checkend_rtol, then simulation is terminated.
-    verbose: 
-        If False, remains silent.
-        If 1 or True, only print time, energy, kinetic energy, total population, and population of each partition region on each state.
-        If 2, in addition, print position and momentum of each partition region on each state.
+    - checkend, checkend_rtol: If true, and sum(abs(boundary(R) * Psi)^2)) > 1 - checkend_rtol, then the simulation is terminated.
+    - boundary: list[array[float]]->array[bool]. Return a bool map with shape equals to position grid where True means inside boundary. Invoked when checkend is true.
+    - verbose: 
+        - If False, remains silent.
+        - If 1 or True, only print time (t), energy (Etot), kinetic energy (KE), total population (Pall), and population of each partition region on each state (P{title}n).
+        - If 2, in addition to 1, print position and momentum of each partition region on each state.
+    - cuda_backend: Uses cupy as backend instead of numpy.
 
-    Returns a list of [time, Population, Position, Momentum ], each
-        is array with shape nel x m ( x nk ), where m is determined by partitioner (None -> 1). The collect timestep is same as output_step.
+    Returns:
+
+    A list of [time, population, position, momentum ], each
+        is array with shape nel x m ( x nk ), where m is determined by partitioner (None -> 1). The collection timestep is same as output_step.
     """
+
+    Psi = para.Psi; H = para.H; KE = para.KE; TU = para.TU; VU = para.VU; VUhalf = para.VUhalf; R = para.R; K = para.K; dA = para.dA; dK = para.dK; dt = para.dt
 
     _tp_axes = list(range(len(VUhalf.shape)))
     _tp_axes[-1], _tp_axes[-2] = _tp_axes[-2], _tp_axes[-1]
@@ -199,9 +226,14 @@ def propagate(Psi, H, KE, TU, VU, VUhalf, R, K, dA, dK, dt, nstep, output_step, 
                     abspsi = abs2(Psi[index_along(Psi, j, -1)]) * pf
                     
                     abspsip = abs2(_backend.fft.fftn(Psi[index_along(Psi, j, -1)] * pf, axes=tuple(range(nk))))
-                    Rhoave.append(_backend.sum(abspsi).get() * dA)
-                    Rave += [_backend.sum(abspsi*R_).get() * dA / Rhoave[-1] for R_ in R]
-                    Pave += [_backend.sum(abspsip*K_).get() * dK / Rhoave[-1] for K_ in K]
+                    if cuda_backend:
+                        Rhoave.append(_backend.sum(abspsi).get() * dA)
+                        Rave += [_backend.sum(abspsi*R_).get() * dA / Rhoave[-1] for R_ in R]
+                        Pave += [_backend.sum(abspsip*K_).get() * dK / Rhoave[-1] for K_ in K]
+                    else:
+                        Rhoave.append(_backend.sum(abspsi) * dA)
+                        Rave += [_backend.sum(abspsi*R_) * dA / Rhoave[-1] for R_ in R]
+                        Pave += [_backend.sum(abspsip*K_) * dK / Rhoave[-1] for K_ in K]
 
             Rhotot = _backend.sum(abs2(Psi)) * dA
             KEave = sum((_backend.sum(abs2(Psip_) * KE) * dK for Psip_ in Psip))
