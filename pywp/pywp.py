@@ -88,7 +88,7 @@ def preprocess(potential:Potential, N, L, sigma, R0, P0, n0:int, M:float, dt:flo
 
     # superfast eigenvalue for nel == 2
 
-    if nel == 2:
+    if nel == 2 and potential.has_get_phase():
 
         dE = np.real(H[index_along2(H, 1, -2, 1, -1)] - H[index_along2(H, 0, -2, 0, -1)])/2
         Eave = np.real(H[index_along2(H, 1, -2, 1, -1)] + H[index_along2(H, 0, -2, 0, -1)])/2
@@ -97,7 +97,7 @@ def preprocess(potential:Potential, N, L, sigma, R0, P0, n0:int, M:float, dt:flo
         cos_half_theta = np.sqrt(0.5*(1 + dE/delta))
         sin_half_theta = np.sqrt(0.5*(1 - dE/delta))
 
-        Phi = potential.get_phase(R) if potential.has_get_phase() else 1
+        Phi = potential.get_phase(R)
 
         U = np.zeros(H.shape, dtype=complex)
         U[index_along2(U, 0, -2, 0, -1)] = cos_half_theta * Phi
@@ -109,22 +109,27 @@ def preprocess(potential:Potential, N, L, sigma, R0, P0, n0:int, M:float, dt:flo
         E[index_along(E, 0, -1)] = Eave - delta
         E[index_along(E, 1, -1)] = Eave + delta
 
-    EU = np.zeros(H.shape, dtype=complex)
-    EUhalf = np.zeros(H.shape, dtype=complex)
+        EU = np.zeros(H.shape, dtype=complex)
+        EUhalf = np.zeros(H.shape, dtype=complex)
 
-    for j in range(H.shape[-1]):
-        EU[index_along2(EU, j, -2, j, -1)] = np.exp(-1j*dt*E[index_along(E, j, -1)])
-        EUhalf[index_along2(EU, j, -2, j, -1)] = np.exp(-1j*dt/2*E[index_along(E, j, -1)])
+        for j in range(H.shape[-1]):
+            EU[index_along2(EU, j, -2, j, -1)] = np.exp(-1j*dt*E[index_along(E, j, -1)])
+            EUhalf[index_along2(EU, j, -2, j, -1)] = np.exp(-1j*dt/2*E[index_along(E, j, -1)])
 
-    _tp_axes = list(range(len(U.shape)))
-    _tp_axes[-1], _tp_axes[-2] = _tp_axes[-2], _tp_axes[-1]
-    VU = np.matmul(U, np.matmul(EU, np.conj(np.transpose(U, axes=_tp_axes))))
-    VUhalf = np.matmul(U, np.matmul(EUhalf, np.conj(np.transpose(U, axes=_tp_axes))))
-    
-    #VU = np.zeros(H.shape, dtype=complex)
-    #VU[:,:,0,0] = np.exp(-1j*dt*H[:,:,0,0])
-    #VUhalf = np.zeros(H.shape, dtype=complex)
-    #VUhalf[:,:,0,0] = np.exp(-1j*dt/2*H[:,:,0,0])
+        _tp_axes = list(range(len(U.shape)))
+        _tp_axes[-1], _tp_axes[-2] = _tp_axes[-2], _tp_axes[-1]
+        VU = np.matmul(U, np.matmul(EU, np.conj(np.transpose(U, axes=_tp_axes))))
+        VUhalf = np.matmul(U, np.matmul(EUhalf, np.conj(np.transpose(U, axes=_tp_axes))))
+
+    else:   # fall back to expm
+        from scipy.linalg import expm
+
+        VU = np.zeros(H.shape, dtype=complex)
+        VUhalf = np.zeros(H.shape, dtype=complex)
+
+        for idx in np.ndindex(*N):
+            VU[idx] = expm(-1j*dt*H[idx])
+            VUhalf[idx] = expm(-1j*dt/2*H[idx])
 
     return PhysicalParameter(Psi, H, KE, TU, VU, VUhalf, R, K, dA, dK, dt)
 
@@ -188,7 +193,18 @@ def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=No
     else:
         _backend = np
 
-        dot_v = lambda v, p: _backend.einsum('ijkl,ijl->ijk', v, p)
+        if nk == 1:
+            dot_v = lambda v, p: _backend.einsum('ikl,il->ik', v, p)
+        elif nk == 2:
+            dot_v = lambda v, p: _backend.einsum('ijkl,ijl->ijk', v, p)
+        elif nk == 3:
+            dot_v = lambda v, p: _backend.einsum('ijzkl,ijzl->ijzk', v, p)
+        else:
+            def dot_v(v, p):
+                p1 = np.zeros_like(p)
+                for j in range(nel):
+                    p1[index_along(p1, j, -1)] = np.sum(v[index_along(v, j, -2)] * p, axis=nk)
+                return p1
 
     Psi = dot_v(VUhalf, Psi)
 

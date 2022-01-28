@@ -12,6 +12,7 @@ class Tully1(pywp.Potential):
         self.A = 0.01
         self.B = 1.0
         self.C = 0.005
+        super().__init__()
 
     def get_H(self, R):
         
@@ -22,6 +23,9 @@ class Tully1(pywp.Potential):
         H[:,:,1,0] = H[:,:,0,1]
 
         return H
+
+    def has_get_phase(self):
+        return True
 
 myapp = pywp.Application(Tully1)
 myapp.parse_args()

@@ -6,7 +6,7 @@ from . import Potential
 class Nothing(Potential):
 
     def __init__(self):
-        pass
+        super().__init__()
 
     def get_H(self, R):
         H = np.zeros((R[0].shape[0], R[0].shape[1], 2, 2))
@@ -21,6 +21,7 @@ class Tully1(Potential):
         self.A = 0.01
         self.B = 1.0
         self.C = 0.005
+        super().__init__()
 
     def get_H(self, R):
         
@@ -32,6 +33,9 @@ class Tully1(Potential):
 
         return H
 
+    def has_get_phase(self):
+        return True
+
 
 class Flat(Potential):
 
@@ -39,6 +43,7 @@ class Flat(Potential):
         self.A = A
         self.B = B
         self.W = W
+        super().__init__()
 
     def get_H(self, R):
 
