@@ -134,7 +134,7 @@ def preprocess(potential:Potential, N, L, sigma, R0, P0, n0:int, M:float, dt:flo
     return PhysicalParameter(Psi, H, KE, TU, VU, VUhalf, R, K, dA, dK, dt)
 
 
-def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=None, partition_titles=None, trajfile=None, checkend=False, boundary=None, checkend_rtol=0.05, verbose=True, cuda_backend=False) -> list:
+def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=None, partition_titles=None, analyzer=None, trajfile=None, checkend=False, boundary=None, checkend_rtol=0.05, verbose=True, cuda_backend=False) -> list:
     """ The actual propagating function.
     Args:
    
@@ -143,6 +143,7 @@ def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=No
     - partitioner: None/list[list[array[float]]->array[bool]]. Each of the functions will be called by p(R), where R is position meshgrid, list with potential.dim() element of size N x N ...
         it should return a boolean map (with size N x N ...). If None, a unit partitioner is used (just a number 1).
     - partition_titles: list[str]. Titles for verbose output.
+    - analyzer: None/list[(R:list[array], K:list[array], psi:array, cuda_backend:bool)->any]. The analyzer will be called every output_step, and result will be stored in the returned variable.
     - trajfile: None/file-like. Will write wavefunction (on both position and momentum basis) to the file, ordered by electronic state. 
         All positions first, followed by momentums.
     - checkend, checkend_rtol: If true, and sum(abs(boundary(R) * Psi)^2)) > 1 - checkend_rtol, then the simulation is terminated.
@@ -155,8 +156,9 @@ def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=No
 
     Returns:
 
-    A list of [time, population, position, momentum ], each
+    A list of [time, population, position, momentum, extra ], each (except extra)
         is array with shape nel x m ( x nk ), where m is determined by partitioner (None -> 1). The collection timestep is same as output_step.
+    extra is a list containing the return of each analyzer.
     """
 
     Psi = para.Psi; H = para.H; KE = para.KE; TU = para.TU; VU = para.VU; VUhalf = para.VUhalf; R = para.R; K = para.K; dA = para.dA; dK = para.dK; dt = para.dt
@@ -231,17 +233,18 @@ def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=No
                 Psi /= (_backend.sum(abs2(Psi))* dA)**0.5
 
             Psi_output = dot_v(VUhalfinv, Psi)
-            Psip = [_backend.fft.fftn(Psi[index_along(Psi, j, -1)], axes=tuple(range(nk))) for j in range(nel)]
+            Psip = [_backend.fft.fftn(Psi_output[index_along(Psi, j, -1)], axes=tuple(range(nk))) for j in range(nel)]
 
             Rhoave = []
             Rave = []
             Pave = []
+            Extra = []
 
             for j in range(nel):
                 for pf in partition_filter:
-                    abspsi = abs2(Psi[index_along(Psi, j, -1)]) * pf
+                    abspsi = abs2(Psi_output[index_along(Psi_output, j, -1)]) * pf
                     
-                    abspsip = abs2(_backend.fft.fftn(Psi[index_along(Psi, j, -1)] * pf, axes=tuple(range(nk))))
+                    abspsip = abs2(_backend.fft.fftn(Psi_output[index_along(Psi_output, j, -1)] * pf, axes=tuple(range(nk))))
                     if cuda_backend:
                         Rhoave.append(_backend.sum(abspsi).get() * dA)
                         Rave += [_backend.sum(abspsi*R_).get() * dA / Rhoave[-1] for R_ in R]
@@ -251,14 +254,20 @@ def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=No
                         Rave += [_backend.sum(abspsi*R_) * dA / Rhoave[-1] for R_ in R]
                         Pave += [_backend.sum(abspsip*K_) * dK / Rhoave[-1] for K_ in K]
 
-            Rhotot = _backend.sum(abs2(Psi)) * dA
+            if analyzer:
+                for a in analyzer:
+                    Extra.append(a(R, K, Psi_output, cuda_backend))
+
+            Rhotot = _backend.sum(abs2(Psi_output)) * dA
             KEave = sum((_backend.sum(abs2(Psip_) * KE) * dK for Psip_ in Psip))
             Eave = KEave + _backend.sum(_backend.real(_backend.conj(Psi_output) * dot_v(H, Psi_output))) * dA
 
             result.append((i*dt, 
                 np.array(Rhoave).reshape((nel, len(partition_filter))), 
                 np.array(Rave).reshape((nel, len(partition_filter), nk)), 
-                np.array(Pave).reshape((nel, len(partition_filter), nk))))
+                np.array(Pave).reshape((nel, len(partition_filter), nk)),
+                Extra,
+                ))
 
             if trajfile:
                 for j in range(nel):

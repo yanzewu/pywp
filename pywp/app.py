@@ -62,6 +62,7 @@ class Application:
             parser.add_argument('--potential', help='name of potential', default='test.Tully1')
 
         self.args = parser.parse_args(args)
+        self.analyzer = None
 
     def set_args(self, box:list, grid:list, mass:float, init_r:list, init_p:list, sigma:list, init_s:int, Nstep:int, dt:float, potential_params:list,
         output_step:int=1000, checkend:bool=True, xwall_left:float=-0.9, xwall_right:float=0.9, rtol:float=0.05, output:int=1, traj:str='', gpu:bool=False):
@@ -117,6 +118,7 @@ class Application:
             output_step=args.output_step,
             partitioner=self.partitioner,
             partition_titles=self.partition_titles,
+            analyzer=self.analyzer,
             trajfile=trajfile,
             checkend=args.checkend,
             boundary=self.boundary,
@@ -136,8 +138,10 @@ class Application:
                         len(result)))
             else:
                 with open(args.traj + '.meta', 'w') as f:
-                    f.write('-L %f -N %d -n %d -dt %f -step %d' % (
+                    f.write('-L %s -N %s -n %d -dt %f -step %d' % (
                         ','.join((str(x) for x in box)),
                         ','.join((str(x) for x in grid)),
                         pot.get_dim()*2, args.dt*args.output_step,
                         len(result)))
+
+        return result
