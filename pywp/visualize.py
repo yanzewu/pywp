@@ -6,6 +6,7 @@ import matplotlib.animation as anim
 from . import Potential
 from . import snapshot
 from .pywp import abs2
+from . import util
 
 def visualize_pe_1d(pot:Potential, box:float, grid:int, coord=None, vmin=None, vmax=None, show_off_diagonal=True, show_phase=False):
     """ Visualize the PE surface on a dimension.
@@ -18,6 +19,7 @@ def visualize_pe_1d(pot:Potential, box:float, grid:int, coord=None, vmin=None, v
     show_phase: Show phase of off-diagonal elements.
     """
     nel = pot.get_dim()
+    nk = pot.get_kdim()
 
     # make the grids
     if coord is None:
@@ -27,7 +29,7 @@ def visualize_pe_1d(pot:Potential, box:float, grid:int, coord=None, vmin=None, v
 
     shape_out = [1 if coord[i] != None else grid for i in range(pot.get_kdim())]
     R  = []
-    for i in range(nel):
+    for i in range(nk):
         if coord[i] is None:
             r = np.linspace(-box/2, box/2, grid)
             dim = i
@@ -35,7 +37,7 @@ def visualize_pe_1d(pot:Potential, box:float, grid:int, coord=None, vmin=None, v
         else:
             R.append(np.reshape(coord[i]*np.ones(grid), shape_out))
 
-    H = pot.get_H(R)[tuple((0 if i != dim else slice(None) for i in range(nel)))]
+    H = pot.get_H(R)[tuple((0 if i != dim else slice(None) for i in range(nk)))]
     E = np.zeros((grid, nel))
     for n in range(grid):
         E[n] = np.linalg.eigvalsh(H[n])
@@ -91,6 +93,7 @@ def visualize_pe_2d(pot:Potential, box, grid, coord=None, vmin=None, vmax=None, 
         raise ValueError('The potential must be at least 2 dimensional')
 
     nel = pot.get_dim()
+    nk = pot.get_kdim()
 
     # make the grids
     if coord is None:
@@ -107,7 +110,7 @@ def visualize_pe_2d(pot:Potential, box, grid, coord=None, vmin=None, vmax=None, 
     R  = []
     x, y = np.meshgrid(np.linspace(-box[0]/2,box[0]/2,grid[0]), np.linspace(-box[1]/2,box[1]/2,grid[1]), indexing='ij')
     
-    for i in range(nel):
+    for i in range(nk):
         if i == dims[0]:
             R.append(np.reshape(x, shape_out))
         elif i == dims[1]:
@@ -115,12 +118,8 @@ def visualize_pe_2d(pot:Potential, box, grid, coord=None, vmin=None, vmax=None, 
         else:
             R.append(np.reshape(coord[i]*np.ones_like(x), shape_out))
 
-    H = pot.get_H(R)[tuple((0 if coord[i] is not None else slice(None) for i in range(nel)))]
-    E = np.zeros((grid[0], grid[1], nel))
-
-    for i in range(grid[0]):
-        for j in range(grid[1]):
-            E[i, j] = np.linalg.eigvalsh(H[i, j])
+    H = pot.get_H(R)[tuple((0 if coord[i] is not None else slice(None) for i in range(nk)))]
+    E = util.adiabatic_surface(H)
 
     if vmax is not None and vmin is not None:
         H[np.logical_and(H > vmax, H < vmin)] = np.nan
@@ -157,8 +156,6 @@ def visualize_pe_2d(pot:Potential, box, grid, coord=None, vmin=None, vmax=None, 
             for j in range(i+1, nel):
                 ax = axs[c // nel, c % nel]
                 ax.imshow(np.flipud(np.angle(H[:,:,i,j]).T), extent=ext)
-                ax.axes.get_xaxis().set_visible(False)
-                ax.axes.get_yaxis().set_visible(False)
                 ax.set_title('Phase%d%d' % (i, j))
                 c += 1
 
@@ -189,6 +186,7 @@ def visualize_pe_2d_surf(pot:Potential, box, grid, coord=None, vmin=None, vmax=N
         raise ValueError('The potential must be at least 2 dimensional')
 
     nel = pot.get_dim()
+    nk = pot.get_kdim()
 
     # make the grids
     if coord is None:
@@ -205,7 +203,7 @@ def visualize_pe_2d_surf(pot:Potential, box, grid, coord=None, vmin=None, vmax=N
     R  = []
     x, y = np.meshgrid(np.linspace(-box[0]/2,box[0]/2,grid[0]), np.linspace(-box[1]/2,box[1]/2,grid[1]), indexing='ij')
     
-    for i in range(nel):
+    for i in range(nk):
         if i == dims[0]:
             R.append(np.reshape(x, shape_out))
         elif i == dims[1]:
@@ -213,7 +211,7 @@ def visualize_pe_2d_surf(pot:Potential, box, grid, coord=None, vmin=None, vmax=N
         else:
             R.append(np.reshape(coord[i]*np.ones_like(x), shape_out))
 
-    H = pot.get_H(R)[tuple((0 if coord[i] is not None else slice(None) for i in range(nel)))]
+    H = pot.get_H(R)[tuple((0 if coord[i] is not None else slice(None) for i in range(nk)))]
     E = np.zeros((grid[0], grid[1], nel))
 
     for i in range(grid[0]):
@@ -414,3 +412,75 @@ def write_gif(filename, figure, update_callback, n_frames, fps=5, dpi=192):
         for j in range(n_frames):
             update_callback(j)
             mw.grab_frame()
+
+
+def imshow(data:np.ndarray, extent:list, vmin=None, vmax=None, ax:plt.Axes=None, colormap='viridis'):
+    """ Show a 2D data in correct orientation.
+    data: 2D array. The first dimension represents x and the second represents y.
+    extent: The boundary coordination (xmin, xmax, ymin, ymax).
+    vmin, vmax: The min/max data for colormap.
+    ax: The axis.
+    colormap: Colormap used for data.
+    """
+    if ax is None:
+        ax = plt.axes()
+
+    ax.imshow(np.flipud(data.T), extent=extent, aspect='auto', vmin=vmin, vmax=vmax, cmap=cm.get_cmap(colormap))
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+
+
+def imshow_multiple(*data, extent:list, vmin=None, vmax=None, fig=None, colormap='viridis'):
+    """ Show multiple 2D data in correct orientation.
+    data: list of 2D array. The first dimension represents x and the second represents y.
+    extent: The boundary coordination (xmin, xmax, ymin, ymax).
+    vmin, vmax: The min/max data for colormap.
+    fig: The figure. If None, will call `plt.subplots()`.
+    colormap: Colormap used for data.
+    """
+
+    nrow = int(np.floor(len(data)**0.5))
+    ncol = int(np.ceil(len(data)/nrow))
+    if fig:
+        axs = fig.subplots(nrow, ncol, sharex=True, sharey=True, squeeze=False)
+    else:
+        _, axs = plt.subplots(nrow, ncol, sharex=True, sharey=True, squeeze=False)
+
+    for j in range(nrow):
+        for k in range(ncol):
+            if j*ncol + k > len(data):
+                axs[j, k].set_visible(False)
+            else:
+                axs[j, k].imshow(np.flipud(data[j*ncol+k].T), extent=extent, vmin=vmin, vmax=vmax, cmap=cm.get_cmap(colormap))
+            
+                if j == nrow-1:
+                    axs[j, k].set_xlabel('x')
+                if k == 0:
+                    axs[j, k].set_ylabel('y')
+            
+            
+def surf_multiple(*data, grid:tuple, vmin=None, vmax=None, fig=None, colormap='Dark2'):
+    """ Surf plot multiple 2D data in correct orientation.
+    data: list of 2D array. The first dimension represents x and the second represents y.
+    grid: the coordinate grid (X, Y), each being an 2D array with same oritention of data.
+    vmin, vmax: The min/max of z axis.
+    fig: The figure. If None, will call `plt.subplots()`.
+    colormap: Colormap used for each data.
+    """
+
+    from mpl_toolkits.mplot3d import Axes3D
+
+    if fig is None:
+        fig = plt.figure()
+        
+    ax1 = fig.add_subplot(1, 1, 1, projection='3d')
+    colors1 = cm.get_cmap(colormap).colors
+    X, Y = grid
+
+    for c, d in zip(colors1, data):
+        ax1.plot_surface(np.flipud(X.T), np.flipud(Y.T), np.flipud(d.T), color=c, shade=False)
+    
+    ax1.set_zlim([vmin, vmax])
+    ax1.set_xlabel('x')
+    ax1.set_ylabel('y')
+
