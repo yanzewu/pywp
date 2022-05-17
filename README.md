@@ -40,7 +40,7 @@ Most command line arguments are self-explanatory. They are:
 
 ### Way 1: Running like a command
 
-Just put your potential file into pywp/potential folder. The potential class should derive `pywp.Potential`. In command argument, select `--potential=yourfile.Yourclassname`. For example, `--potential=test.Tully1` selects class Tully1 defined in pywp/potential/test.py.
+Just put your potential file into pywp/potential folder. The potential class should inherit `pywp.Potential`. In command argument, select `--potential=yourfile.Yourclassname`. For example, `--potential=test.Tully1` selects class Tully1 defined in pywp/potential/test.py.
 
 ### Way 2: Running as a custom application
 
@@ -55,7 +55,7 @@ Put the following code into your script:
     app.parse_args()
     app.run()
 
-Then your script can accepts command line args just like PyWP itself. Note it cannot accept the `--potential` argument, as the potential is already specified when building the app.
+Then your script can accept command line args just like PyWP itself. Note it cannot accept the `--potential` argument, as the potential is already specified when building the app.
 
 ### Way 3: Running as a script
 
@@ -76,7 +76,16 @@ Then your script can be executed directly. Note that all the required arguments 
 ## The Potential Class
 
 The potential class has six functions, and you may override part of them, or all or them.
-- The constructor: Receives the parameter from `--potential_params`. Must call to `super().__init__()` before end.
-- get_H(R): R is a list with Ndof (= get_kdim()) elements. Each element is a Ngrid1 x Ngrid2 x ... x NgridNdof array, representing the value of first, second, ... nuclear coord in the grid. It is just like what you get in `meshgrid()`. The returned Hamiltonian has shape Ngrid1 x Ngrid2 x ... x NgridNdof x Nel x Nel. The last two are electronic dimensions.
+- The constructor: Receives the parameter from `--potential_params`. Must call `super().__init__()` before returning.
+- get_H(R): R is a list with Ndof (= get_kdim()) elements. Each element is a Ngrid_1 x Ngrid_2 x ... x Ngrid_Ndof array, representing the value of first, second, ... nuclear coord in the grid. It is just like what you get in `meshgrid(..., indexing=ij)`. The returned Hamiltonian has shape Ngrid_1 x Ngrid_2 x ... x Ngrid_Ndof x Nel x Nel. The last two are electronic dimensions.
 - get_kdim(), get_dim(): Return nuclear DOF and electronic DOF. You don't need to override them if you have already passed them in `super().__init__()`.
-- has_get_phase(), get_phase(R): This is special for two-state Hamiltonian. If `has_get_phase()` returns True, will call `get_phase()` to return the phase (that is, x/abs(x)) of the off-diagonal element `H[...,0,1]`. This will make the pre-calculation significantly faster for grids more than one dimensional. The returned phase has same dimension as `R[0]`.
+- has_get_phase(), get_phase(R): This is special for two-state Hamiltonian. If `has_get_phase()` returns True, will call `get_phase()` to return the phase (that is, x/abs(x)) of the off-diagonal element `H[...,0,1]`. This will make the pre-calculation significantly faster for grids more than one dimensional. The returned phase should have the same dimension as `R[0]`.
+
+
+## Visualization
+
+PyWP comes with a strong visualizing support, which make it easy to test custom potentials. Most functions are in `pywp.visualize`.
+
+- visualize_pe_1d, visualize_pe_2d and visualize_pe_2d_surf plot the potential surface in one or two specific dimension(s).
+- visualize_snapshot_1d, visualize_snapshot_2d plot the wavepacket in one or two specific dimension(s).
+- imshow, imshow_multiple, surf_multiple are wrappers around matplotlib functions, which can quickly plot 2D data.

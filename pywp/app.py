@@ -22,6 +22,7 @@ class Application:
             self.partition_titles = partition_titles
 
         self.boundary = boundary
+        self.analyzer = []
 
     def parse_args(self, args=sys.argv[1:]):
 

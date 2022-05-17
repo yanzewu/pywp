@@ -250,16 +250,6 @@ def visualize_snapshot_1d(snapshots:snapshot.Snapshots, axis=0, relative_vmax=2.
     """
     fig = plt.figure(figsize=figsize)
 
-    if output_callback:
-        interactive = False
-
-    index = [0]
-    if interactive:
-        pressed_flag = [0]
-        exit_flag = []
-        fig.canvas.mpl_connect('key_press_event', lambda e: _plt_key_press_callback(e, index, len(snapshots.data), pressed_flag))
-        fig.canvas.mpl_connect('close_event', lambda e: exit_flag.append(1))
-
     grid = snapshots.data[0][0].shape[1+axis]
     r = np.linspace(-snapshots.box[axis]/2, snapshots.box[axis]/2, grid)
     p = np.fft.fftshift(np.fft.fftfreq(grid, snapshots.box[axis]/(grid-1)))*2*np.pi
@@ -278,7 +268,7 @@ def visualize_snapshot_1d(snapshots:snapshot.Snapshots, axis=0, relative_vmax=2.
         fig.clear()
         fig.text(0, 0, 'Frame=%d, Time=%.4g' % (frame, snapshots.dt * frame))
         if not show_momentum:
-            ax1 = fig.add_subplot(1, 2, 1)
+            ax1 = fig.add_subplot(1, 1, 1)
         else:
             ax1 = fig.add_subplot(1, 2, 1)
             ax2 = fig.add_subplot(1, 2, 2)
@@ -306,37 +296,14 @@ def visualize_snapshot_1d(snapshots:snapshot.Snapshots, axis=0, relative_vmax=2.
 
     if output_callback:
         return fig, display_callback, len(snapshots.data)
-
-    while index[0] < len(snapshots.data):    
-        display_callback(index[0])
-        if interactive:
-            try:
-                pressed_flag[0] = 0
-                while not pressed_flag[0] and not exit_flag:
-                    plt.waitforbuttonpress(timeout=1)
-                if exit_flag:
-                    break
-            except (Exception, KeyboardInterrupt):
-                break
         else:
-            index[0] += 1
-        plt.draw()
+        return _display_loop(fig, display_callback, len(snapshots.data), interactive)
 
 
 def visualize_snapshot_2d(snapshots:snapshot.Snapshots, axis=(0, 1), relative_vmax=0.2, show_momentum=False, interactive=True, output_callback=False, figsize=None):
     """ Similar to visualize_snapshot_1d(), but using imshow() in two selected dimensions.
     """
     fig = plt.figure(figsize=figsize)
-
-    if output_callback:
-        interactive = False
-
-    index = [0]
-    if interactive:
-        pressed_flag = [0]
-        exit_flag = []
-        fig.canvas.mpl_connect('key_press_event', lambda e: _plt_key_press_callback(e, index, len(snapshots.data), pressed_flag))
-        fig.canvas.mpl_connect('close_event', lambda e: exit_flag.append(1))
 
     assert len(axis) == 2
     Lx, Ly = snapshots.box[axis[0]], snapshots.box[axis[1]]
@@ -361,7 +328,7 @@ def visualize_snapshot_2d(snapshots:snapshot.Snapshots, axis=(0, 1), relative_vm
         for i in range(nel):
             ax = fig.add_subplot(rows, nel, i+1)
             ax.imshow(np.flipud(plot_data[frame][0][i].T), vmin=0, vmax=vmax1, extent=ext1, aspect='auto')
-            ax.set_title('State %d [R]'%i)
+            ax.set_title('State %d [R]'%i if show_momentum else 'State %d' % i)
 
         if show_momentum:
             for i in range(nel):
@@ -372,8 +339,32 @@ def visualize_snapshot_2d(snapshots:snapshot.Snapshots, axis=(0, 1), relative_vm
 
     if output_callback:
         return fig, display_callback, len(snapshots.data)
+    else:
+        return _display_loop(fig, display_callback, len(snapshots.data), interactive)
 
-    while index[0] < len(snapshots.data):
+
+
+
+def _plt_key_press_callback(event, index, nstep, pressed_flag):
+    pressed_flag[0] = 1
+    if event.key == ',' and index[0] > -nstep+1:
+        index[0] = (index[0] - 1) % nstep
+    elif event.key == '.' and index[0] < nstep-1:
+        index[0] += 1
+    elif event.key == 'q':
+        index[0] = nstep
+
+
+def _display_loop(fig, display_callback, length, interactive):
+
+    index = [0]
+    pressed_flag = [0]
+    exit_flag = []
+    if interactive:
+        fig.canvas.mpl_connect('key_press_event', lambda e: _plt_key_press_callback(e, index, length, pressed_flag))
+        fig.canvas.mpl_connect('close_event', lambda e: exit_flag.append(1))
+
+    while index[0] < length:
         display_callback(index[0])
         if interactive:
             try:
@@ -387,15 +378,6 @@ def visualize_snapshot_2d(snapshots:snapshot.Snapshots, axis=(0, 1), relative_vm
         else:
             index[0] += 1
         plt.draw()
-
-def _plt_key_press_callback(event, index, nstep, pressed_flag):
-    pressed_flag[0] = 1
-    if event.key == ',' and index[0] > -nstep+1:
-        index[0] = (index[0] - 1) % nstep
-    elif event.key == '.' and index[0] < nstep-1:
-        index[0] += 1
-    elif event.key == 'q':
-        index[0] = nstep
 
 
 def write_video(filename, figure, update_callback, n_frames, fps=5, dpi=192):
@@ -414,7 +396,7 @@ def write_gif(filename, figure, update_callback, n_frames, fps=5, dpi=192):
             mw.grab_frame()
 
 
-def imshow(data:np.ndarray, extent:list, vmin=None, vmax=None, ax:plt.Axes=None, colormap='viridis'):
+def imshow(data:np.ndarray, extent:list, vmin=None, vmax=None, ax:plt.Axes=None, colormap='viridis', xlabel='x', ylabel='y', title=''):
     """ Show a 2D data in correct orientation.
     data: 2D array. The first dimension represents x and the second represents y.
     extent: The boundary coordination (xmin, xmax, ymin, ymax).
@@ -426,11 +408,13 @@ def imshow(data:np.ndarray, extent:list, vmin=None, vmax=None, ax:plt.Axes=None,
         ax = plt.axes()
 
     ax.imshow(np.flipud(data.T), extent=extent, aspect='auto', vmin=vmin, vmax=vmax, cmap=cm.get_cmap(colormap))
-    ax.set_xlabel('x')
-    ax.set_ylabel('y')
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    if title:
+        ax.set_title(title)
 
 
-def imshow_multiple(*data, extent:list, vmin=None, vmax=None, fig=None, colormap='viridis'):
+def imshow_multiple(*data, extent:list, vmin=None, vmax=None, fig=None, colormap='viridis', xlabel='x', ylabel='y', titles=[]):
     """ Show multiple 2D data in correct orientation.
     data: list of 2D array. The first dimension represents x and the second represents y.
     extent: The boundary coordination (xmin, xmax, ymin, ymax).
@@ -452,14 +436,16 @@ def imshow_multiple(*data, extent:list, vmin=None, vmax=None, fig=None, colormap
                 axs[j, k].set_visible(False)
             else:
                 axs[j, k].imshow(np.flipud(data[j*ncol+k].T), extent=extent, vmin=vmin, vmax=vmax, cmap=cm.get_cmap(colormap))
+                if j*ncol + k < len(titles) and titles[j*ncol + k]:
+                    axs[j, k].set_title(titles[j*ncol + k])
             
                 if j == nrow-1:
-                    axs[j, k].set_xlabel('x')
+                    axs[j, k].set_xlabel(xlabel)
                 if k == 0:
-                    axs[j, k].set_ylabel('y')
+                    axs[j, k].set_ylabel(ylabel)
             
             
-def surf_multiple(*data, grid:tuple, vmin=None, vmax=None, fig=None, colormap='Dark2'):
+def surf_multiple(*data, grid:tuple, vmin=None, vmax=None, fig=None, colormap='Dark2', xlabel='x', ylabel='y', titles=[]):
     """ Surf plot multiple 2D data in correct orientation.
     data: list of 2D array. The first dimension represents x and the second represents y.
     grid: the coordinate grid (X, Y), each being an 2D array with same oritention of data.
@@ -478,9 +464,12 @@ def surf_multiple(*data, grid:tuple, vmin=None, vmax=None, fig=None, colormap='D
     X, Y = grid
 
     for c, d in zip(colors1, data):
-        ax1.plot_surface(np.flipud(X.T), np.flipud(Y.T), np.flipud(d.T), color=c, shade=False)
+        s = ax1.plot_surface(np.flipud(X.T), np.flipud(Y.T), np.flipud(d.T), color=c, shade=False)
+        if titles:
+            s._edgecolors2d = s._edgecolor3d
+            s._facecolors2d = s._facecolor3d
     
     ax1.set_zlim([vmin, vmax])
-    ax1.set_xlabel('x')
-    ax1.set_ylabel('y')
-
+    ax1.set_xlabel(xlabel)
+    ax1.set_ylabel(ylabel)
+    ax1.legend(titles)
