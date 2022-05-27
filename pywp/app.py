@@ -7,13 +7,19 @@ from . import preprocess, propagate, potential
 
 class Application:
 
-    def __init__(self, pottype, partitioner=None, partition_titles=None, boundary=None):
+    def __init__(self, pottype:type=None, potential:potential.Potential=None, partitioner=None, partition_titles=None, boundary=None):
         """ pottype: class name of the potential.
             partitioner: list[list[array[float]]->array[bool]] boolean map of position meshgrids. 
             partition_titles: Names of each partition.
             boundary: list[array[float]]->array[bool] boolean map of position meshgrids.
         """
-        self.pottype = pottype
+        if potential is not None:
+            self.pot = potential
+            self.pottype = type(potential)
+        else:
+            self.pottype = pottype
+            self.pot = None
+
         if not partitioner:
             self.partitioner = [lambda _: 1, lambda x:x[0] >= 0, lambda x:x[0] < 0]
             self.partition_titles = ['P', 'T', 'R']
@@ -65,7 +71,7 @@ class Application:
         self.args = parser.parse_args(args)
         self.analyzer = None
 
-    def set_args(self, box:list, grid:list, mass:float, init_r:list, init_p:list, sigma:list, init_s:int, Nstep:int, dt:float, potential_params:list,
+    def set_args(self, box:list, grid:list, mass:float, init_r:list, init_p:list, sigma:list, init_s:int, Nstep:int, dt:float, potential_params:list=[],
         output_step:int=1000, checkend:bool=True, xwall_left:float=-0.9, xwall_right:float=0.9, rtol:float=0.05, output:int=1, traj:str='', gpu:bool=False):
         self.args = argparse.Namespace(box=box, grid=grid, mass=mass, init_r=init_r, init_p=init_p, sigma=sigma, init_s=init_s, Nstep=Nstep,
             dt=dt, potential_params=potential_params, output_step=output_step, checkend=checkend, xwall_left=xwall_left,
@@ -92,15 +98,18 @@ class Application:
         trajfile = open(args.traj, 'w') if args.traj else None
 
 
-        if self.pottype is None:
-            self.pottype = potential.get_potential(args.potential)
-        if isinstance(args.potential_params, str):
-            if args.potential_params:
-                pot = self.pottype(*[float(v) for v in args.potential_params.split(',')])
-            else:
-                pot = self.pottype()
-        elif isinstance(args.potential_params, list):
-            pot = self.pottype(*args.potential_params)
+        if self.pot:
+            pot = self.pot
+        else:
+            if self.pottype is None:
+                self.pottype = potential.get_potential(args.potential)
+            if isinstance(args.potential_params, str):
+                if args.potential_params:
+                    pot = self.pottype(*[float(v) for v in args.potential_params.split(',')])
+                else:
+                    pot = self.pottype()
+            elif isinstance(args.potential_params, list):
+                pot = self.pottype(*args.potential_params)
 
         box = get_multidim_arg(args, 'box', 'L', 'Ly', pot.get_kdim())
         grid = get_multidim_arg(args, 'grid', 'M', 'My', pot.get_kdim())

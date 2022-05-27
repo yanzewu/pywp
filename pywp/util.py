@@ -65,12 +65,7 @@ def adiabatic_surface(Hel:np.ndarray):
     Hel: (... x 2 x 2) array.
     Returns: (... x 2) array.
     """
-    E = np.empty(Hel.shape[:-1])
-
-    # nditer
-    for index in np.ndindex(Hel.shape[:-2]):
-        E[index] = np.linalg.eigvalsh(Hel[index])
-    return E
+    return np.linalg.eigvalsh(Hel)
 
 
 def adiabat(Hel:np.ndarray):
@@ -80,13 +75,7 @@ def adiabat(Hel:np.ndarray):
         E: (... x 2) array.
         U: (... x 2 x 2) array.
     """
-    E = np.empty(Hel.shape[:-1])
-    U = np.empty(Hel.shape, dtype=complex)
-
-    # nditer
-    for index in np.ndindex(Hel.shape[:-2]):
-        E[index], U[index] = np.linalg.eigh(Hel[index])
-    return E, U
+    return np.linalg.eigh(Hel)
 
 
 def gradient(Hel:np.ndarray, dx, direction='all'):
@@ -137,3 +126,17 @@ def drv_coupling_hf(deltaH:list, E:np.ndarray, U:np.ndarray):
         drv_coupling.append(dc)
 
     return drv_coupling
+
+
+def expm_batch(M, dt):
+    """ Calculating exp(-1j*M*dt).
+    """
+    D, U = np.linalg.eigh(M)
+    DD = np.zeros_like(U)
+    for j in range(D.shape[-1]):
+        DD[..., j, j] = np.exp(-1j*dt*D[..., j])
+
+    nk = len(U.shape)-2
+    tp_index = list(range(nk)) + [nk+1, nk]
+    return U @ DD @ np.conj(np.transpose(U, tp_index))
+    

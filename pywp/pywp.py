@@ -2,6 +2,7 @@
 import numpy as np 
 import itertools
 from .potential import Potential
+from .util import expm_batch
 
 def abs2(x):
     return (x * x.conj()).real
@@ -121,15 +122,9 @@ def preprocess(potential:Potential, N, L, sigma, R0, P0, n0:int, M:float, dt:flo
         VU = np.matmul(U, np.matmul(EU, np.conj(np.transpose(U, axes=_tp_axes))))
         VUhalf = np.matmul(U, np.matmul(EUhalf, np.conj(np.transpose(U, axes=_tp_axes))))
 
-    else:   # fall back to expm
-        from scipy.linalg import expm
-
-        VU = np.zeros(H.shape, dtype=complex)
-        VUhalf = np.zeros(H.shape, dtype=complex)
-
-        for idx in np.ndindex(*N):
-            VU[idx] = expm(-1j*dt*H[idx])
-            VUhalf[idx] = expm(-1j*dt/2*H[idx])
+    else:
+        VU = expm_batch(H, dt)
+        VUhalf = expm_batch(H, dt/2)
 
     return PhysicalParameter(Psi, H, KE, TU, VU, VUhalf, R, K, dA, dK, dt)
 

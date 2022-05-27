@@ -38,9 +38,7 @@ def visualize_pe_1d(pot:Potential, box:float, grid:int, coord=None, vmin=None, v
             R.append(np.reshape(coord[i]*np.ones(grid), shape_out))
 
     H = pot.get_H(R)[tuple((0 if i != dim else slice(None) for i in range(nk)))]
-    E = np.zeros((grid, nel))
-    for n in range(grid):
-        E[n] = np.linalg.eigvalsh(H[n])
+    E = util.adiabatic_surface(H)
     
     colors1 = cm.get_cmap('Set1').colors
     colors2 = cm.get_cmap('Accent').colors
@@ -212,11 +210,7 @@ def visualize_pe_2d_surf(pot:Potential, box, grid, coord=None, vmin=None, vmax=N
             R.append(np.reshape(coord[i]*np.ones_like(x), shape_out))
 
     H = pot.get_H(R)[tuple((0 if coord[i] is not None else slice(None) for i in range(nk)))]
-    E = np.zeros((grid[0], grid[1], nel))
-
-    for i in range(grid[0]):
-        for j in range(grid[1]):
-            E[i, j] = np.linalg.eigvalsh(H[i, j])
+    E = util.adiabatic_surface(H)
 
     if vmax is not None and vmin is not None:
         H[np.logical_and(H > vmax, H < vmin)] = np.nan

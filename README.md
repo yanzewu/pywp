@@ -6,6 +6,8 @@ Efficient and customizable code to run wavepacket dynamics using the split opera
 
 Currently pywp only supports diabatic basis.
 
+Requires python >= 3.5, numpy >= 1.9 and (for GPU only) cupy >= 9.5.
+
 ## Usage
 
 Run
@@ -67,6 +69,12 @@ Put the following code into your script:
         ...
 
     app = pywp.Application(MyPotential)
+    app.set_args(init_r=.., init_p=.., dt=.., potential_params=..., ...)
+    app.run()
+
+Alternatively,
+
+    app = pywp.Application(potential=MyPotential(myargs...))
     app.set_args(init_r=.., init_p=.., dt=.., ...)
     app.run()
 
@@ -79,7 +87,7 @@ The potential class has six functions, and you may override part of them, or all
 - The constructor: Receives the parameter from `--potential_params`. Must call `super().__init__()` before returning.
 - get_H(R): R is a list with Ndof (= get_kdim()) elements. Each element is a Ngrid_1 x Ngrid_2 x ... x Ngrid_Ndof array, representing the value of first, second, ... nuclear coord in the grid. It is just like what you get in `meshgrid(..., indexing=ij)`. The returned Hamiltonian has shape Ngrid_1 x Ngrid_2 x ... x Ngrid_Ndof x Nel x Nel. The last two are electronic dimensions.
 - get_kdim(), get_dim(): Return nuclear DOF and electronic DOF. You don't need to override them if you have already passed them in `super().__init__()`.
-- has_get_phase(), get_phase(R): This is special for two-state Hamiltonian. If `has_get_phase()` returns True, will call `get_phase()` to return the phase (that is, x/abs(x)) of the off-diagonal element `H[...,0,1]`. This will make the pre-calculation significantly faster for grids more than one dimensional. The returned phase should have the same dimension as `R[0]`.
+- has_get_phase(), get_phase(R): This is special for two-state Hamiltonian. If `has_get_phase()` returns True, will call `get_phase()` to return the phase (that is, x/abs(x)) of the off-diagonal element `H[...,0,1]`. This will preserve a gauge in adiabatic transformation (but does not affect the dynamics itself). The returned phase should have the same dimension as `R[0]`.
 
 
 ## Visualization
