@@ -175,7 +175,7 @@ def visualize_pe_2d(pot:Potential, box, grid, coord=None, vmin=None, vmax=None, 
 
 
 
-def visualize_pe_2d_surf(pot:Potential, box, grid, coord=None, vmin=None, vmax=None):
+def visualize_pe_2d_surf(pot:Potential, box, grid, coord=None, vmin=None, vmax=None, colormap='Dark2', **kwargs):
     """ Similar as visualize_pe_2d(), but only show the diabatic and adiabatic surfaces in two 3D plots.
     """
     from mpl_toolkits.mplot3d import Axes3D
@@ -223,9 +223,14 @@ def visualize_pe_2d_surf(pot:Potential, box, grid, coord=None, vmin=None, vmax=N
     ax1 = fig.add_subplot(1, 2, 1, projection='3d')
     ax2 = fig.add_subplot(1, 2, 2, projection='3d')
     
-    colors1 = cm.get_cmap('Dark2').colors
+    colors1 = cm.get_cmap(colormap).colors
+    if kwargs.get('occlusion', False):
+        multi_surf(ax1, [(x.T, y.T, np.flipud(np.real(H[:,:,i,i]).T), colors1[i]) for i in range(nel)], **kwargs)
+    else:
     for i in range(nel):
         ax1.plot_surface(np.flipud(x.T), np.flipud(y.T), np.flipud(np.real(H[:,:,i,i]).T), color=colors1[i], shade=False)
+
+    for i in range(nel):    # adiabats are strictly ascending, so no occlusion needed
         ax2.plot_surface(np.flipud(x.T), np.flipud(y.T), np.flipud(E[:,:,i].T), color=colors1[i], shade=False)
 
     ax1.set_title('Diabats')
@@ -234,7 +239,7 @@ def visualize_pe_2d_surf(pot:Potential, box, grid, coord=None, vmin=None, vmax=N
     plt.show()    
 
 
-def visualize_snapshot_1d(snapshots:snapshot.Snapshots, axis=0, relative_vmax=2.0, show_momentum=False, interactive=True, output_callback=False, figsize=None):
+def visualize_snapshot_1d(snapshots:snapshot.Snapshots, axis=0, relative_vmax=2.0, show_momentum=False, interactive=True, output_callback=False, figsize=None, colormap='Set1'):
     """ Visualize the snapshot file in one dimension.
     axis: The selected dimension;
     relative_vmax: Axis limit, relative to maximum value of data at all times;
@@ -251,7 +256,7 @@ def visualize_snapshot_1d(snapshots:snapshot.Snapshots, axis=0, relative_vmax=2.
     nk = snapshots.kdim()
     nel = snapshots.eldim()
     sum_index=tuple((j+1 for j in range(nk) if j != axis)) if nk > 1 else None
-    colors1 = cm.get_cmap('Set1').colors
+    colors1 = cm.get_cmap(colormap).colors
 
     plot_data = [(np.sum(abs2(d[0]), axis=sum_index), np.sum(abs2(d[1]), axis=sum_index)) for d in snapshots.data]
 
@@ -294,7 +299,7 @@ def visualize_snapshot_1d(snapshots:snapshot.Snapshots, axis=0, relative_vmax=2.
         return _display_loop(fig, display_callback, len(snapshots.data), interactive)
 
 
-def visualize_snapshot_2d(snapshots:snapshot.Snapshots, axis=(0, 1), relative_vmax=0.2, show_momentum=False, interactive=True, output_callback=False, figsize=None):
+def visualize_snapshot_2d(snapshots:snapshot.Snapshots, axis=(0, 1), relative_vmax=0.2, show_momentum=False, adiabatic=False, interactive=True, output_callback=False, figsize=None, colormap='viridis', **kwargs):
     """ Similar to visualize_snapshot_1d(), but using imshow() in two selected dimensions.
     """
     fig = plt.figure(figsize=figsize)
@@ -307,12 +312,34 @@ def visualize_snapshot_2d(snapshots:snapshot.Snapshots, axis=(0, 1), relative_vm
 
     nk = snapshots.kdim()
     nel = snapshots.eldim()
-    sum_index=tuple((j+1 for j in range(nk) if j not in axis)) if nk > 1 else None
+    sum_index=tuple((j for j in range(nk) if j not in axis)) if nk > 1 else None
 
-    plot_data = [(np.sum(abs2(d[0]), axis=sum_index), np.sum(abs2(d[1]), axis=sum_index)) for d in snapshots.data]
+    plot_data_r = []
+    plot_data_p = []
+    if adiabatic:
+        H = kwargs['potential'].get_H(snapshots.get_grid().build())
+        E, U = util.adiabat(H)
 
-    vmax1 = max([np.max(d[0]) for d in plot_data]) * relative_vmax
-    vmax2 = max([np.max(d[1]) for d in plot_data]) * relative_vmax
+    for j in range(len(snapshots)):
+        if adiabatic:
+            psiR = snapshots.get_snapshot(j, momentum=False)
+            psiRad = util.project_wavefunction(psiR, U, inverse=True)
+            plot_data_r.append(np.flipud(np.transpose(np.sum(abs2(psiRad), axis=sum_index), (1,0,2))))
+            if show_momentum:
+                psiPad = np.stack([snapshot.transform_r_to_p(psiRad[..., k], False) for k in range(psiRad.shape[-1])], axis=-1)
+                plot_data_p.append(np.flipud(np.transpose(np.sum(abs2(psiPad), axis=sum_index), (1,0,2))))
+
+        elif show_momentum:
+            psiR, psiP = snapshots.get_snapshot(j)
+            plot_data_r.append(np.flipud(np.transpose(np.sum(abs2(psiR), axis=sum_index), (1,0,2))))
+            plot_data_p.append(np.flipud(np.transpose(np.sum(abs2(psiP), axis=sum_index), (1,0,2))))
+        else:
+            psiR = snapshots.get_snapshot(j, momentum=False)
+            plot_data_r.append(np.flipud(np.transpose(np.sum(abs2(psiR), axis=sum_index), (1,0,2))))
+
+    vmax1 = max([np.max(d) for d in plot_data_r]) * relative_vmax
+    if show_momentum:
+        vmax2 = max([np.max(d) for d in plot_data_p]) * relative_vmax
 
     def display_callback(frame):
         fig.clear()
@@ -321,13 +348,13 @@ def visualize_snapshot_2d(snapshots:snapshot.Snapshots, axis=(0, 1), relative_vm
         rows = 1 if not show_momentum else 2
         for i in range(nel):
             ax = fig.add_subplot(rows, nel, i+1)
-            ax.imshow(np.flipud(plot_data[frame][0][i].T), vmin=0, vmax=vmax1, extent=ext1, aspect='auto')
+            ax.imshow(plot_data_r[frame][..., i], vmin=0, vmax=vmax1, extent=ext1, aspect='auto', cmap=colormap)
             ax.set_title('State %d [R]'%i if show_momentum else 'State %d' % i)
 
         if show_momentum:
             for i in range(nel):
                 ax = fig.add_subplot(rows, nel, i+nel+1)
-                ax.imshow(np.flipud(plot_data[frame][1][i].T), vmin=0, vmax=vmax2, extent=ext2, aspect='auto')
+                ax.imshow(plot_data_p[frame][..., i], vmin=0, vmax=vmax2, extent=ext2, aspect='auto', cmap=colormap)
                 ax.set_title('State %d [P]'%i)
         plt.tight_layout()
 
@@ -337,6 +364,34 @@ def visualize_snapshot_2d(snapshots:snapshot.Snapshots, axis=(0, 1), relative_vm
         return _display_loop(fig, display_callback, len(snapshots.data), interactive)
 
 
+
+def multi_surf(ax, data, disconnect_edge=True, **kwargs):
+
+    if not disconnect_edge:
+        vdata = [d[2] for d in data]
+    else:
+        vdata = []
+        for d in data:
+            p = d[2].copy()
+            p[:, 0] = np.nan
+            vdata.append(p)
+
+    cdata = []
+    for d in data:
+        if isinstance(d[3], np.ndarray):
+            cdata.append(d[3])
+        else:
+            cdata.append(np.tile(np.array(list(d[3])), (data[0][0].shape[0], data[0][0].shape[1] , 1)))
+
+    ax.plot_surface(
+        np.hstack([d[0] for d in data]),
+        np.hstack([d[1] for d in data]),
+        np.hstack(vdata),
+            facecolors=np.hstack(cdata),
+            shade=False,
+            rcount=kwargs.get('rcount', 32)*len(data),
+            ccount=kwargs.get('ccount', 32),
+    )
 
 
 def _plt_key_press_callback(event, index, nstep, pressed_flag):
@@ -369,9 +424,11 @@ def _display_loop(fig, display_callback, length, interactive):
                     break
             except (Exception, KeyboardInterrupt):
                 break
+            plt.draw()
         else:
             index[0] += 1
         plt.draw()
+            plt.pause(0.01)
 
 
 def write_video(filename, figure, update_callback, n_frames, fps=5, dpi=192):

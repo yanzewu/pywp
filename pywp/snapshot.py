@@ -1,5 +1,6 @@
 
 import numpy as np
+from . import util
 
 class Snapshots:
     
@@ -8,30 +9,76 @@ class Snapshots:
         self.box = box
         self.dt = dt
 
-    def kdim(self):
-        return len(self.data[0][0].shape)-1
+    def kdim(self) -> int:
+        return self.data[0][0].ndim-1
 
-    def eldim(self):
+    def eldim(self) -> int:
         return self.data[0][0].shape[0]
 
-    def grid(self):
+    def get_grid(self):
+        """ Return a grid instance.
+        """
+        return util.Grid([(-b/2, b/2) for b in self.box], [self.data[0][0].shape[n+1] for n in range(self.kdim())])
+
+    def grid(self) -> tuple:
+        """ Return a list[int] specifing grids size on each kinetic dimension.
+        """
         return self.data[0][0].shape[1:]
 
     def get_R_grid(self):
+        """ Return a list[array] as position grids (created by meshgrid())
+        """
         r = []
         for L, g in zip(self.box, self.data[0][0].shape[1:]):
             r.append(np.linspace(-L/2, L/2, g))
         return np.meshgrid(*r, indexing='ij')
 
     def get_P_grid(self):
+        """ Return a list[array] as momentum grids (created by meshgrid())
+        """
         p = []
         for L, g in zip(self.box, self.data[0][0].shape[1:]):
             p.append(np.fft.fftshift(np.fft.fftfreq(g, L/(g-1)))*2*np.pi)
         return np.meshgrid(*p, indexing='ij')
 
+    def get_snapshot(self, index:int, order:str='k', momentum=True, time=False):
+        """ Get a specific snapshot at index.
+        index: integer less than len(Snapshots).
+        order: e/k.
+            k: Put kinetic dimensions at the beginning, shape will be like (nk1, nk2, ..., nel)
+            e: Put electronic dimensions at the beginning, shape will be like (nel, nk1, nk2, ...)
+        
+        Returns:
+            If momentum is set, will return (psiR, psiP), otherwise returns psiR only.
+            If time is set, will return (..., index*dt)
+        """
+        psiR, psiP = self.data[index]
+
+        if order == 'k':
+            tp_index = list(range(1, self.kdim()+1)) + [0]
+            psiR = np.transpose(psiR, tp_index)
+            if momentum:
+                psiP = np.transpose(psiP, tp_index)
+
+        if momentum:
+            if time:
+                return psiR, psiP, self.dt * (index % len(self.data))
+            else:
+                return psiR, psiP
+        else:
+            if time:
+                return psiR, self.dt*index * (index % len(self.data))
+            else:
+                return psiR
+
+    def __len__(self):
+        return len(self.data)
+
 
 def load_file(filename:str) -> Snapshots:
-    
+    """ Load a snapshot file with "filename.meta" as metadata.
+    Returns a Snapshots instance.
+    """
     with open(filename + '.meta', 'r') as metaf:
         metadata = metaf.readline().split()
 

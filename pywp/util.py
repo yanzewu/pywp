@@ -87,7 +87,7 @@ def gradient(Hel:np.ndarray, dx, direction='all'):
     Returns: list[ndarray], each being the gradient on one direction.
     """
     if direction == 'all':
-        direction = tuple(range(len(Hel.shape)-2))
+        direction = tuple(range(Hel.ndim-2))
 
     if isinstance(dx, (int, float)):
         dx = [dx] * len(direction)
@@ -128,7 +128,7 @@ def drv_coupling_hf(deltaH:list, E:np.ndarray, U:np.ndarray):
     return drv_coupling
 
 
-def expm_batch(M, dt):
+def expm_batch(M:np.ndarray, dt:float):
     """ Calculating exp(-1j*M*dt).
     """
     D, U = np.linalg.eigh(M)
@@ -140,3 +140,10 @@ def expm_batch(M, dt):
     tp_index = list(range(nk)) + [nk+1, nk]
     return U @ DD @ np.conj(np.transpose(U, tp_index))
     
+
+def project_wavefunction(psi:np.ndarray, U:np.ndarray, inverse=False):
+    if inverse:
+        return (psi[..., None, :] @ np.conj(U))[..., 0, :]
+    else:
+        return (U @ psi[..., None])[..., 0]
+
