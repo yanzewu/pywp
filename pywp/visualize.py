@@ -227,8 +227,8 @@ def visualize_pe_2d_surf(pot:Potential, box, grid, coord=None, vmin=None, vmax=N
     if kwargs.get('occlusion', False):
         multi_surf(ax1, [(x.T, y.T, np.flipud(np.real(H[:,:,i,i]).T), colors1[i]) for i in range(nel)], **kwargs)
     else:
-    for i in range(nel):
-        ax1.plot_surface(np.flipud(x.T), np.flipud(y.T), np.flipud(np.real(H[:,:,i,i]).T), color=colors1[i], shade=False)
+        for i in range(nel):
+            ax1.plot_surface(np.flipud(x.T), np.flipud(y.T), np.flipud(np.real(H[:,:,i,i]).T), color=colors1[i], shade=False)
 
     for i in range(nel):    # adiabats are strictly ascending, so no occlusion needed
         ax2.plot_surface(np.flipud(x.T), np.flipud(y.T), np.flipud(E[:,:,i].T), color=colors1[i], shade=False)
@@ -258,7 +258,10 @@ def visualize_snapshot_1d(snapshots:snapshot.Snapshots, axis=0, relative_vmax=2.
     sum_index=tuple((j+1 for j in range(nk) if j != axis)) if nk > 1 else None
     colors1 = cm.get_cmap(colormap).colors
 
-    plot_data = [(np.sum(abs2(d[0]), axis=sum_index), np.sum(abs2(d[1]), axis=sum_index)) for d in snapshots.data]
+    if nk > 1:
+        plot_data = [(np.sum(abs2(d[0]), axis=sum_index), np.sum(abs2(d[1]), axis=sum_index)) for d in snapshots.data]
+    else:
+        plot_data = [(abs2(d[0]), abs2(d[1])) for d in snapshots.data]
 
     vmax1 = max([np.max(d[0]) for d in plot_data]) * relative_vmax
     vmax2 = max([np.max(d[1]) for d in plot_data]) * relative_vmax
@@ -295,7 +298,7 @@ def visualize_snapshot_1d(snapshots:snapshot.Snapshots, axis=0, relative_vmax=2.
 
     if output_callback:
         return fig, display_callback, len(snapshots.data)
-        else:
+    else:
         return _display_loop(fig, display_callback, len(snapshots.data), interactive)
 
 
@@ -396,7 +399,7 @@ def multi_surf(ax, data, disconnect_edge=True, **kwargs):
 
 def _plt_key_press_callback(event, index, nstep, pressed_flag):
     pressed_flag[0] = 1
-    if event.key == ',' and index[0] > -nstep+1:
+    if event.key == ',' and index[0] > 0:
         index[0] = (index[0] - 1) % nstep
     elif event.key == '.' and index[0] < nstep-1:
         index[0] += 1
@@ -427,7 +430,7 @@ def _display_loop(fig, display_callback, length, interactive):
             plt.draw()
         else:
             index[0] += 1
-        plt.draw()
+            plt.draw()
             plt.pause(0.01)
 
 
