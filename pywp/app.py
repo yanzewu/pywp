@@ -7,11 +7,13 @@ from . import preprocess, propagate, potential
 
 class Application:
 
-    def __init__(self, pottype:type=None, potential:potential.Potential=None, partitioner=None, partition_titles=None, boundary=None):
+    def __init__(self, pottype:type=None, potential:potential.Potential=None, partitioner=None, partition_titles=None, boundary=None, wp_generator=None, analyzer=None):
         """ pottype: class name of the potential.
             partitioner: list[list[array[float]]->array[bool]] boolean map of position meshgrids. 
             partition_titles: Names of each partition.
             boundary: list[array[float]]->array[bool] boolean map of position meshgrids.
+            analyzer: list[(R:list[array], K:list[array], psi:array, cuda_backend:bool)->any]. 
+                The analyzer will be called every output_step, and result will be stored in the returned variable.
         """
         if potential is not None:
             self.pot = potential
@@ -27,8 +29,9 @@ class Application:
             self.partitioner = partitioner
             self.partition_titles = partition_titles
 
+        self.wp_generator = wp_generator
         self.boundary = boundary
-        self.analyzer = []
+        self.analyzer = analyzer
 
     def parse_args(self, args=sys.argv[1:]):
 
@@ -52,7 +55,8 @@ class Application:
         parser.add_argument('--init_px', help='init px', type=float, required=True)
         parser.add_argument('--init_py', help='init py', type=float)
         parser.add_argument('--init_p', help='init momentum', type=parsefloatlist)
-        parser.add_argument('--init_s', help='init surface', type=int, required=True)
+        parser.add_argument('--init_s', help='init surface', type=int)
+        parser.add_argument('--init_c', help='init amplitudes', type=parsefloatlist)
         parser.add_argument('--xwall_left', help='left boundary', type=float, default=-0.9)
         parser.add_argument('--xwall_right', help='right boundary', type=float, default=0.9)
         parser.add_argument('--potential_params', help='potential_params', default='')
@@ -71,9 +75,30 @@ class Application:
         self.args = parser.parse_args(args)
         self.analyzer = None
 
-    def set_args(self, box:list, grid:list, mass:float, init_r:list, init_p:list, sigma:list, init_s:int, Nstep:int, dt:float, potential_params:list=[],
+    def set_args(self, box:list, grid:list, mass:float, init_r:list, init_p:list, sigma:list, init_c, Nstep:int, dt:float, potential_params:list=[],
         output_step:int=1000, checkend:bool=True, xwall_left:float=-0.9, xwall_right:float=0.9, rtol:float=0.05, output:int=1, traj:str='', gpu:bool=False):
-        self.args = argparse.Namespace(box=box, grid=grid, mass=mass, init_r=init_r, init_p=init_p, sigma=sigma, init_s=init_s, Nstep=Nstep,
+        """ 
+        Args:
+            - box: `list[float]`. The simulation box. For example, \[L1,L2,L3] will make the actual box x=[-L1/2, L1/2], y=[-L2/2, L2/2], z=[-L3/3, L3/3].
+            - grid: `list[int]`. The grid number in each dimension.
+            - mass: `float`. Mass of the nuclei. Currently it's a scalar.
+            - init_r: `list[float]`. Initial position of the wavepacket (the center of the gaussian).
+            - init_p: `list[float]`. Initial momentum of the wavepacket.
+            - sigma: `list[float]`. The initial standard deviation of the wavepacket. The wavefunction will be exp(-x^2/sigmax^2-y^2/sigmay^2...).
+            - init_c: `list[float]` or `int`. Initial amplitude or surface label.
+            - Nstep: `int`. Maximum number of step for simulation.
+            - dt: `float`. Integration time interval.
+            - potential_params: `list`. Arguments for the potential, will passed to the potential's `__init__()` as the optional argument list.
+            - output_step: `int`. Interval between outputs, analysis and writing trajectory.
+            - checkend: `int`. Whether using the checkend algorithm. Will terminate the simulation if the fraction of wavepacket that goes beyond xwall_left or xwall_right in the first dimension is greater than rtol. Default: True.
+            - xwall_left: `float`. The relative value of the leftwall for checkend. The actual wall will be located at `box[0]/2*xwall_left`. Default: -0.9.
+            - xwall_right: `float`. The relative value of the rightwall for checkend. The actual wall will be located at `box[0]/2*xwall_right`. Default: 0.9.
+            - rtol: `float`. The relative tolerance for checkend. Default: 0.05.
+            - output: `int`. The output level to the console. 0: no output; 1: output population; 2: output population, position and momentum.
+            - traj: `str`. Filename of trajectory. If empty then will not write trajectory. Note the trajectory file size can grow dramatically when the nuclear degrees of freedom increases.
+            - gpu: `bool`. True/False. PyWP depends on package cupy for GPU functions.
+        """
+        self.args = argparse.Namespace(box=box, grid=grid, mass=mass, init_r=init_r, init_p=init_p, sigma=sigma, init_c=init_c, Nstep=Nstep,
             dt=dt, potential_params=potential_params, output_step=output_step, checkend=checkend, xwall_left=xwall_left,
             xwall_right=xwall_right, rtol=rtol, output=output, traj=traj, gpu=gpu)
 
@@ -116,11 +141,15 @@ class Application:
         sigma = get_multidim_arg(args, 'sigma', 'sigma_x', 'sigma_y', pot.get_kdim())
         init_r = get_multidim_arg(args, 'init_r', 'init_x', 'init_y', pot.get_kdim())
         init_p = get_multidim_arg(args, 'init_p', 'init_px', 'init_py', pot.get_kdim())
+        init_c = getattr(args, 'init_c', getattr(args, 'init_s', None))
 
         if not self.boundary:
             self.boundary = lambda x: np.logical_and(x[0] > args.xwall_left*box[0]/2, x[0] < args.xwall_right*box[0]/2)
 
-        preproc_args = preprocess(pot, grid, box, sigma, init_r, init_p, args.init_s, args.mass, args.dt)
+        if self.wp_generator is None:
+            self.wp_generator = lambda R: np.exp(sum([1j*p*R_ - (R_-r)**2/s**2 for (r, p, R_, s) in zip(init_r, init_p, R, sigma)]))
+
+        preproc_args = preprocess(pot, grid, box, self.wp_generator, init_c, args.mass, args.dt)
 
         result = propagate(
             preproc_args,

@@ -2,7 +2,7 @@
 PyWP
 ===
 
-Efficient and customizable code to run wavepacket dynamics using the split operator method. Supports arbitrary number of electronic states and nuclear degrees of freedom (*: the output is limited to 3D, but in the future I'll extend it). Supports GPU.
+Efficient and customizable code to run Cartesian wavepacket dynamics using the split operator method. Supports arbitrary number of electronic states and nuclear degrees of freedom (*: the output is limited to 3D, but in the future I'll extend it). Supports GPU.
 
 Currently pywp only supports diabatic basis.
 
@@ -10,90 +10,80 @@ Requires python >= 3.5, numpy >= 1.9 and (for GPU only) cupy >= 9.5.
 
 ## Usage
 
-Run
+Here is an example of running pywp with built-in potential (Tully1):
 
-    python3 -m pywp [args]
+    import pywp
 
-PyWP can also be used as a library. See below for more details.
+    app = pywp.Application(potential=pywp.get_potential('test.Tully1')())
+    app.set_args(box=[16,4], grid=[256,64], mass=2000, init_r=[-5,0], init_p=[20,0], sigma=[1,1], init_c=[1.0,0], Nstep=10000, dt=0.1, output=2, traj='tully1.traj')
+    result = app.run()
 
-Most command line arguments are self-explanatory. They are:
+To view your running result:
 
-- box: The simulation box. `--box=L1,L2,L3` will make the actual box x=[-L1/2, L1/2], y=[-L2/2, L2/2], z=[-L3/3, L3/3].
-- grid: The grid number in each dimension. Use like `--grid=N1,N2,N3`.
-- mass: Mass of the nuclei. Currently it's a scalar.
-- init_r: Initial position of the wavepacket. Use like `--init_r=x,y,z`.
-- init_p: Initial momentum of the wavepacket. Use like `--init_p=px,py,pz`.
-- sigma: The initial standard deviation of the wavepacket. The wavefunction will be exp(-x^2/sigmax^2-y^2/sigmay^2...). Use like `--sigma=sigmax,sigmay,sigmaz`.
-- init_s: Initial diabatic surface label. Integer.
-- Nstep: Maximum number of step for simulation.
-- dt: Integration time interval.
-- output: The output level to the console. 0: no output; 1: output population; 2: output population, position and momentum.
-- output_step: Interval between two outputs and writing trajectory.
-- traj: Filename of trajectory. If empty then will not write trajectory. Note the trajectory file size can grow dramatically when the nuclear degrees of freedom increases.
-- gpu: True/False. PyWP depends on package cupy for GPU functions.
-- potential: Name of the potential. Only used when it's a built-in potential class. The format is `--potential=my_file.MyClass`. See below for more details.
-- potential_params: Arguments for the potential, will passed to the potential's `__init__()` as the optional argument list. Use like `--potential_params=a,b,c,d`.
-- checkend: Whether using the checkend algorithm. Will terminate the simulation if the fraction of wavepacket that goes beyond xwall_left or xwall_right in the first dimension is greater than rtol.
-- xwall_left: The relative value of the leftwall for checkend.
-- xwall_right: The relative value of the rightwall for checkend.
-- rtol: The relative tolerance for checkend.
+    snapshot = pywp.snapshot.load_file('tully1.traj')
+    pywp.visualize.visualize_snapshot_1d(snapshot)
+
+
+All arguments are set through `set_args()` function. Most of them are self-explanatory. Here is a full list:
+
+- box: `list[float]`. The simulation box. For example, \[L1,L2,L3] will make the actual box x=[-L1/2, L1/2], y=[-L2/2, L2/2], z=[-L3/3, L3/3].
+- grid: `list[int]`. The grid number in each dimension.
+- mass: `float`. Mass of the nuclei. Currently it's a scalar.
+- init_r: `list[float]`. Initial position of the wavepacket (the center of the gaussian).
+- init_p: `list[float]`. Initial momentum of the wavepacket.
+- sigma: `list[float]`. The initial standard deviation of the wavepacket. The wavefunction will be exp(-x\^2/sigmax\^2-y\^2/sigmay\^2...).
+- init_c: `list[float]` or `int`. Initial amplitude or surface label.
+- Nstep: `int`. Maximum number of step for simulation.
+- dt: `float`. Integration time interval.
+- output_step: `int`. Interval between outputs, analysis and writing trajectory.
+- checkend: `int`. Whether using the checkend algorithm. Will terminate the simulation if the fraction of wavepacket that goes beyond xwall_left or xwall_right in the first dimension is greater than rtol. Default: True.
+- xwall_left: `float`. The relative value of the leftwall for checkend. The actual wall will be located at `box[0]/2*xwall_left`. Default: -0.9.
+- xwall_right: `float`. The relative value of the rightwall for checkend. The actual wall will be located at `box[0]/2*xwall_right`. Default: 0.9.
+- rtol: `float`. The relative tolerance for checkend. Default: 0.05.
+- output: `int`. The output level to the console. 0: no output; 1: output population; 2: output population, position and momentum.
+- traj: `str`. Filename of trajectory. If empty then will not write trajectory. Note the trajectory file size can grow dramatically when the nuclear degrees of freedom increases.
+- gpu: `bool`. True/False. PyWP depends on package cupy for GPU functions.
+
 
 ## Customizing
 
-### Way 1: Running like a command
+### Force Field
 
-Just put your potential file into pywp/potential folder. The potential class should inherit `pywp.Potential`. In command argument, select `--potential=yourfile.Yourclassname`. For example, `--potential=test.Tully1` selects class Tully1 defined in pywp/potential/test.py.
-
-### Way 2: Running as a custom application
-
-Put the following code into your script:
-
-    import pywp
-
-    class MyPotential(pywp.Potential):
-        ...
-
-    app = pywp.Application(MyPotential)
-    app.parse_args()
-    app.run()
-
-Then your script can accept command line args just like PyWP itself. Note it cannot accept the `--potential` argument, as the potential is already specified when building the app.
-
-### Way 3: Running as a script
-
-Put the following code into your script:
-
-    import pywp
-
-    class MyPotential(pywp.Potential):
-        ...
-
-    app = pywp.Application(MyPotential)
-    app.set_args(init_r=.., init_p=.., dt=.., potential_params=..., ...)
-    app.run()
-
-Alternatively,
-
-    app = pywp.Application(potential=MyPotential(myargs...))
-    app.set_args(init_r=.., init_p=.., dt=.., ...)
-    app.run()
-
-Then your script can be executed directly. Note that all the required arguments must be set.
-
-
-## The Potential Class
-
-The potential class has six functions, and you may override part of them, or all or them.
+The Potential passed to `Application` must derive `pywp.Potential`. The potential class has six functions, and you may override part of them, or all or them.
 - The constructor: Receives the parameter from `--potential_params`. Must call `super().__init__()` before returning.
 - get_H(R): R is a list with Ndof (= get_kdim()) elements. Each element is a Ngrid_1 x Ngrid_2 x ... x Ngrid_Ndof array, representing the value of first, second, ... nuclear coord in the grid. It is just like what you get in `meshgrid(..., indexing=ij)`. The returned Hamiltonian has shape Ngrid_1 x Ngrid_2 x ... x Ngrid_Ndof x Nel x Nel. The last two are electronic dimensions.
 - get_kdim(), get_dim(): Return nuclear DOF and electronic DOF. You don't need to override them if you have already passed them in `super().__init__()`.
-- has_get_phase(), get_phase(R): This is special for two-state Hamiltonian. If `has_get_phase()` returns True, will call `get_phase()` to return the phase (that is, x/abs(x)) of the off-diagonal element `H[...,0,1]`. This will preserve a gauge in adiabatic transformation (but does not affect the dynamics itself). The returned phase should have the same dimension as `R[0]`.
+- get_phase(), has_get_phase(): These are depracated.
 
+### Boundary Conditions
+
+To use your own boundary instead of the default one, pass a `boundary` in `pywp.Application()`. The boundary takes a list of position array (as if generated by `meshgrid('ij')`) and return a boolean array (0 -> out of boundary and 1 -> inside boundary).
+
+### Region Analysis
+
+Often one is interested in the population in a specific region (e.g., transmitted/reflected). By default, pywp will do the statistics over three region: Overall, R\[0]>0 (transmission) and R\[0]< 0 (reflection). These region can be customized by passing `partitioner` and `partition_titles` when creating an `Application`. Paritioner is a list, each takes a list of position array (as if generated by `meshgrid('ij')`) and return a boolean array (1 -> inside the region). Partition_titles are the titles for each partition, used in output.
+
+### On-the-fly Analysis
+
+If on-the-fly analysis is desired (this is usually due to a too large trajectory), one can pass `analyzer` when creating an `Application`. Analyzer is a list, each takes `(R:list[array], P:list[array], psi:array, cuda_backend:bool)`. Anything returned will be stored and included in the return of `Application.run()`. Note for `psi`, electronic dimension is the last dimension. If GPU is used, `cupy.array` will be given instead of `numpy.array`.
+
+The return of `run()` is a list of tuples: (time:float, population:array, average_position:array, average_momentum:array, analysis_results:list). 
+
+### Custom Wavepacket
+
+If anything other than gaussian is desired, one can pass `wp_generator` when creating an `Application`. It takes the position and return a wavepacket on a single surface.
+
+
+## Snapshots
+
+The wavefunction can be retrieved by `snapshot.get_snapshot()`. The position and momentum grids can be retrieved by `snapshot.get_R_grid()` and `snapshot.get_P_grid()`.
 
 ## Visualization
 
-PyWP comes with a strong visualizing support, which make it easy to test custom potentials. Most functions are in `pywp.visualize`.
+PyWP comes with a powerful visualizing support, which make it easy to test custom potentials. Most functions are in `pywp.visualize`.
 
 - visualize_pe_1d, visualize_pe_2d and visualize_pe_2d_surf plot the potential surface in one or two specific dimension(s).
 - visualize_snapshot_1d, visualize_snapshot_2d plot the wavepacket in one or two specific dimension(s).
 - imshow, imshow_multiple, surf_multiple are wrappers around matplotlib functions, which can quickly plot 2D data.
+
+`python -m pywp.tools.show1d` and `python -m pywp.tools.show2d` are command line wrappers for visualizing snapshots.
