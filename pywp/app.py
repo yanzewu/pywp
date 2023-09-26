@@ -4,6 +4,7 @@ import argparse
 import numpy as np
 
 from . import preprocess, propagate, potential
+from .util import Grid
 
 class Application:
 
@@ -141,7 +142,9 @@ class Application:
         sigma = get_multidim_arg(args, 'sigma', 'sigma_x', 'sigma_y', pot.get_kdim())
         init_r = get_multidim_arg(args, 'init_r', 'init_x', 'init_y', pot.get_kdim())
         init_p = get_multidim_arg(args, 'init_p', 'init_px', 'init_py', pot.get_kdim())
-        init_c = getattr(args, 'init_c', getattr(args, 'init_s', None))
+        init_c = getattr(args, 'init_c', None)
+        if init_c is None:
+            init_c = getattr(args, 'init_s', None)
 
         if not self.boundary:
             self.boundary = lambda x: np.logical_and(x[0] > args.xwall_left*box[0]/2, x[0] < args.xwall_right*box[0]/2)
@@ -149,7 +152,20 @@ class Application:
         if self.wp_generator is None:
             self.wp_generator = lambda R: np.exp(sum([1j*p*R_ - (R_-r)**2/s**2 for (r, p, R_, s) in zip(init_r, init_p, R, sigma)]))
 
-        preproc_args = preprocess(pot, grid, box, self.wp_generator, init_c, args.mass, args.dt)
+        if isinstance(grid, int):
+            N = [grid]*pot.get_kdim()
+        else:
+            assert len(grid) == pot.get_kdim()
+            N = grid
+
+        if isinstance(box, (float, int)):
+            L = [(-box/2, box/2)]*pot.get_kdim()
+        else:
+            assert len(box) == pot.get_kdim()
+            L = [(-b/2, b/2) for b in box]
+
+        
+        preproc_args = preprocess(pot, Grid(L, N), self.wp_generator, init_c, args.mass, args.dt)
 
         result = propagate(
             preproc_args,
