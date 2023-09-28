@@ -200,10 +200,14 @@ def drv_coupling_hf(deltaH:list, E:np.ndarray, U:np.ndarray):
     return drv_coupling
 
 
-def expm_batch(M:np.ndarray, dt:float):
+def expm_batch(M:np.ndarray, dt:float, hermitian:bool=False):
     """ Calculating exp(-1j*M*dt).
     """
-    D, U = np.linalg.eigh(M)
+    if hermitian:
+        D, U = np.linalg.eigh(M)
+    else:
+        D, U = np.linalg.eig(M)
+
     DD = np.zeros_like(U, dtype=complex)
     for j in range(D.shape[-1]):
         DD[..., j, j] = np.exp(-1j*dt*D[..., j])

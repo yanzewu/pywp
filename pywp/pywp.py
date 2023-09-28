@@ -8,28 +8,18 @@ from typing import Union, List
 def abs2(x):
     return (x * x.conj()).real
 
-def index_along(arr, ind, axis):
-    indexer = [slice(None)] * len(arr.shape)
-    indexer[axis] = ind
-    return tuple(indexer)
-
-def index_along2(arr, ind1, axis1, ind2, axis2):
-    indexer = [slice(None)] * len(arr.shape)
-    indexer[axis1] = ind1
-    indexer[axis2] = ind2
-    return tuple(indexer)
-
 
 class PhysicalParameter:
     """ Represents the physical parameters that to use.
     """
-    def __init__(self, Psi, H, KE, TU, VU, VUhalf, R, K, dA:float, dK:float, dt:float):
+    def __init__(self, Psi, H, KE, TU, VU, VUhalf, VUhalfinv, R, K, dA:float, dK:float, dt:float):
         self.Psi = Psi
         self.H = H
         self.KE = KE
         self.TU = TU
         self.VU = VU
         self.VUhalf = VUhalf
+        self.VUhalfinv = VUhalfinv
         self.R = R
         self.K = K
         self.dA = dA
@@ -42,7 +32,7 @@ def preprocess(potential:Union[Potential, np.ndarray], grid:Grid, wavepacket, c0
 
     potential: potential.Potential or a (N1 x N2 x ... x Nel) numpy array.
     grid: A grid instance specifying the actual grid.
-    wavepacket: A (N1 x N2 x ... x Nel) numpy array, or a function that returns such array by taking position (with size 
+    wavepacket: A (N1 x N2 x ... Nn) numpy array, or a function that returns such array by taking position (with size 
         List[array(N1 x ...)]) as the argument. Normalization is not required.
     c0: int/List[float]. Initial surface or amplitude.
     M: mass.
@@ -106,12 +96,13 @@ def preprocess(potential:Union[Potential, np.ndarray], grid:Grid, wavepacket, c0
     TU = np.exp(-1j*dt*KE)
     VU = expm_batch(H, dt)
     VUhalf = expm_batch(H, dt/2)
+    VUhalfinv = expm_batch(H, -dt/2)
 
-    return PhysicalParameter(Psi, H, KE, TU, VU, VUhalf, R, K, dA, dK, dt)
+    return PhysicalParameter(Psi, H, KE, TU, VU, VUhalf, VUhalfinv, R, K, dA, dK, dt)
 
 
-def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=None, partition_titles=None, analyzer=None, trajfile=None, checkend=False, 
-              boundary=None, checkend_rtol=0.05, verbose=True, cuda_backend=False, extra_normalize:bool=True) -> list:
+def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=None, partition_titles=None, analyzer=None, fixes=None, trajfile=None, checkend=False, 
+              boundary=None, checkend_rtol:float=0.05, verbose=True, cuda_backend:bool=False, extra_normalize:bool=False) -> list:
     """ The actual propagating function.
     Args:
    
@@ -121,6 +112,8 @@ def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=No
         it should return a boolean map (with size N x N ...). If None, a unit partitioner is used (just a number 1).
     - partition_titles: list[str]. Titles for verbose output.
     - analyzer: None/list[(R:list[array], K:list[array], psi:array, cuda_backend:bool)->any]. The analyzer will be called every output_step, and result will be stored in the returned variable.
+    - fixes: None/list[(R, psi)->any]. Will be called every step (including t=0), and the result will be saved. Note that the propagation will be significantly slower, since
+        twice calls of exp(-iV*dt/2) has to be invoked instead of a single call of exp(-iV*dt).
     - trajfile: None/file-like. Will write wavefunction (on both position and momentum basis) to the file, ordered by electronic state. 
         All positions first, followed by momentums.
     - checkend, checkend_rtol: If true, and sum(abs(boundary(R) * Psi)^2)) > 1 - checkend_rtol, then the simulation is terminated.
@@ -130,19 +123,17 @@ def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=No
         - If 1 or True, only print time (t), energy (Etot), kinetic energy (KE), total population (Pall), and population of each partition region on each state (P{title}n).
         - If 2, in addition to 1, print position and momentum of each partition region on each state.
     - cuda_backend: Uses cupy as backend instead of numpy.
+    - extra_normalize: Whether the wavepacket is normalized every output_step. Improves long-time stability but may cause unwanted effects.
 
-    Returns:
-
-    A list of [time, population, position, momentum, extra ], each (except extra)
+    Returns: records, or (records, fix_outputs) if any fixes are present.
+    - records: A list of [time, population, position, momentum, extra ], each (except extra)
         is array with shape nel x m ( x nk ), where m is determined by partitioner (None -> 1). The collection timestep is same as output_step.
-    extra is a list containing the return of each analyzer.
+        extra is a list containing the return of each analyzer.
+    - fix_outputs: a list of lists. fix_outputs[n][m] means the result of n'th fix at m'th step. (Note the order is different from records).
     """
 
-    Psi = para.Psi; H = para.H; KE = para.KE; TU = para.TU; VU = para.VU; VUhalf = para.VUhalf; R = para.R; K = para.K; dA = para.dA; dK = para.dK; dt = para.dt
-
-    _tp_axes = list(range(len(VUhalf.shape)))
-    _tp_axes[-1], _tp_axes[-2] = _tp_axes[-2], _tp_axes[-1]
-    VUhalfinv = np.transpose(VUhalf.conjugate(), axes=_tp_axes)
+    Psi = para.Psi; H = para.H; KE = para.KE; TU = para.TU; VU = para.VU; VUhalf = para.VUhalf; VUhalfinv = para.VUhalfinv
+    R = para.R; K = para.K; dA = para.dA; dK = para.dK; dt = para.dt
     
     result = []
 
@@ -163,35 +154,22 @@ def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=No
         partition_filter = [cp.asarray(p) if isinstance(p, np.ndarray) else p for p in partition_filter ]
         boundary_filter = cp.asarray(boundary_filter) if isinstance(boundary_filter, np.ndarray) else boundary_filter
 
-        def dot_v(v, p):
-            p1 = cp.zeros_like(p)
-            for j in range(nel):
-                p1[index_along(p1, j, -1)] = cp.sum(v[index_along(v, j, -2)] * p, axis=nk)
-            return p1
-
     else:
         _backend = np
 
-        if nk == 1:
-            dot_v = lambda v, p: _backend.einsum('ikl,il->ik', v, p)
-        elif nk == 2:
-            dot_v = lambda v, p: _backend.einsum('ijkl,ijl->ijk', v, p)
-        elif nk == 3:
-            dot_v = lambda v, p: _backend.einsum('ijzkl,ijzl->ijzk', v, p)
-        else:
-            def dot_v(v, p):
-                p1 = np.zeros_like(p)
-                for j in range(nel):
-                    p1[index_along(p1, j, -1)] = np.sum(v[index_along(v, j, -2)] * p, axis=nk)
-                return p1
+    def dot_v(v, p):
+        return (v @ p[...,None])[...,0]
+
+    if fixes:
+        fix_outputs = [[f(R, Psi)] for f in fixes]
 
     Psi = dot_v(VUhalf, Psi)
 
     result = []
 
     if verbose:
-        pos_titles = 'XYZ'[:nk] # I don't think nk can be > 3
-        mom_titles = 'xyz'[:nk]
+        pos_titles = 'XYZUVW'[:nk] # I don't think nk can be > 6
+        mom_titles = 'xyzuvw'[:nk]
         if not partition_titles:
             partition_titles = 'ABCDEFGHIJKLMNOPQ'[:len(partition_filter)]
         print('t\tE\tKE\tTotal', end='')
@@ -210,7 +188,7 @@ def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=No
                 Psi /= (_backend.sum(abs2(Psi))* dA)**0.5
 
             Psi_output = dot_v(VUhalfinv, Psi)
-            Psip = [_backend.fft.fftn(Psi_output[index_along(Psi, j, -1)], axes=tuple(range(nk))) for j in range(nel)]
+            Psip = [_backend.fft.fftn(Psi_output[...,j], axes=tuple(range(nk))) for j in range(nel)]
 
             Rhoave = []
             Rave = []
@@ -219,9 +197,9 @@ def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=No
 
             for j in range(nel):
                 for pf in partition_filter:
-                    abspsi = abs2(Psi_output[index_along(Psi_output, j, -1)]) * pf
+                    abspsi = abs2(Psi_output[...,j]) * pf
                     
-                    abspsip = abs2(_backend.fft.fftn(Psi_output[index_along(Psi_output, j, -1)] * pf, axes=tuple(range(nk))))
+                    abspsip = abs2(_backend.fft.fftn(Psi_output[...,j] * pf, axes=tuple(range(nk))))
                     if cuda_backend:
                         Rhoave.append(_backend.sum(abspsi).get() * dA)
                         Rave += [_backend.sum(abspsi*R_).get() * dA / Rhoave[-1] for R_ in R]
@@ -248,7 +226,7 @@ def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=No
 
             if trajfile:
                 for j in range(nel):
-                    Psi_output[index_along(Psi_output, j, -1)].tofile(trajfile)
+                    Psi_output[...,j].tofile(trajfile)
                 for psip in Psip:
                     _backend.fft.fftshift(psip).tofile(trajfile)
 
@@ -264,8 +242,15 @@ def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=No
                 break
 
         for j in range(nel):
-            Psi[index_along(Psi, j, -1)] = _backend.fft.ifftn(
-                _backend.fft.fftn(Psi[index_along(Psi, j, -1)], axes=tuple(range(nk)))*TU, axes=tuple(range(nk)))
-        Psi = dot_v(VU, Psi)
+            Psi[...,j] = _backend.fft.ifftn(
+                _backend.fft.fftn(Psi[...,j], axes=tuple(range(nk)))*TU, axes=tuple(range(nk)))
+            
+        if fixes:
+            Psi = dot_v(VUhalf, Psi)
+            for f, o in zip(fixes, fix_outputs):
+                o.append(f(R, Psi))
+            Psi = dot_v(VUhalf, Psi)
+        else:
+            Psi = dot_v(VU, Psi)
 
-    return result
+    return result if not fixes else (result, fix_outputs)
