@@ -14,12 +14,34 @@ class Nothing(Potential):
         H[:,:,1,1] = 0.1
         return H
 
+class Tully1_1D(Potential):
+    def __init__(self, *params):
+
+        self.A = 0.01
+        self.B = 1.6
+        self.C = 0.005
+        super().__init__()
+
+    def get_H(self, R):
+        
+        H = np.zeros((R[0].shape[0], 2, 2))
+        H[:,0,0] = self.A*(1 - np.exp(-self.B*R[0])) * (R[0] >= 0) - self.A*(1 - np.exp(self.B*R[0])) * (R[0] < 0)
+        H[:,1,1] = -H[:,0,0]
+        H[:,0,1] = self.C*np.exp(-R[0]**2)
+        H[:,1,0] = H[:,0,1]
+
+        return H
+    
+    def get_kdim(self):
+        return 1
+
+
 class Tully1(Potential):
 
     def __init__(self, *params):
 
         self.A = 0.01
-        self.B = 1.0
+        self.B = 1.6
         self.C = 0.005
         super().__init__()
 
