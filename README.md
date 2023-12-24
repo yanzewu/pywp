@@ -6,7 +6,7 @@ Efficient and customizable code to run Cartesian wavepacket dynamics using the s
 
 Currently pywp only supports diabatic basis.
 
-Requires python >= 3.5, numpy >= 1.9 and (for GPU only) cupy >= 9.5.
+Requires python >= 3.7, numpy >= 1.9 and (for GPU only) cupy >= 9.5.
 
 ## Usage
 

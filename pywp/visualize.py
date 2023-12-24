@@ -391,9 +391,10 @@ def multi_surf(ax, data, disconnect_edge=True, **kwargs):
         np.hstack([d[1] for d in data]),
         np.hstack(vdata),
             facecolors=np.hstack(cdata),
-            shade=False,
+            shade=kwargs.get('shade', False),
             rcount=kwargs.get('rcount', 32)*len(data),
             ccount=kwargs.get('ccount', 32),
+            edgecolors=kwargs.get('edgecolors', None),
     )
 
 
@@ -499,7 +500,7 @@ def imshow_multiple(*data, extent:list, vmin=None, vmax=None, fig=None, colormap
                     axs[j, k].set_ylabel(ylabel)
             
             
-def surf_multiple(*data, grid:tuple, vmin=None, vmax=None, fig=None, colormap='Dark2', xlabel='x', ylabel='y', titles=[]):
+def surf_multiple(*data, grid:tuple, vmin=None, vmax=None, fig=None, colormap='Dark2', edgecolors=None, xlabel='x', ylabel='y', titles=[], occlusion=False, shade=False):
     """ Surf plot multiple 2D data in correct orientation.
     data: list of 2D array. The first dimension represents x and the second represents y.
     grid: the coordinate grid (X, Y), each being an 2D array with same oritention of data.
@@ -517,13 +518,60 @@ def surf_multiple(*data, grid:tuple, vmin=None, vmax=None, fig=None, colormap='D
     colors1 = cm.get_cmap(colormap).colors
     X, Y = grid
 
-    for c, d in zip(colors1, data):
-        s = ax1.plot_surface(np.flipud(X.T), np.flipud(Y.T), np.flipud(d.T), color=c, shade=False)
-        if titles:
-            s._edgecolors2d = s._edgecolor3d
-            s._facecolors2d = s._facecolor3d
+    if occlusion:
+        multi_surf(ax1, [(np.flipud(X.T), np.flipud(Y.T), np.flipud(d.T), c) for c, d in zip(colors1, data)], shade=False, edgecolors=edgecolors)
+    else:
+        for c, d in zip(colors1, data):
+            s = ax1.plot_surface(np.flipud(X.T), np.flipud(Y.T), np.flipud(d.T), color=c, shade=shade, edgecolors=edgecolors)
+            if titles:
+                s._edgecolors2d = s._edgecolor3d
+                s._facecolors2d = s._facecolor3d
     
     ax1.set_zlim([vmin, vmax])
     ax1.set_xlabel(xlabel)
     ax1.set_ylabel(ylabel)
-    ax1.legend(titles)
+    if not occlusion:
+        ax1.legend(titles)
+
+
+class WavepacketDisplayer1D:
+    
+    def __init__(self, axis=0, fig=None, show_momentum=False):
+        if not fig:
+            self.fig = plt.figure()
+
+        self.frame = 0
+        self.r = None
+        self.axis = axis
+        self.sum_axis = None
+
+        #plt.ion()
+
+    def __call__(self, R, K, psi, cuda_backend):
+        
+        if self.r is None:
+            r_indexer = [0]*(R[0].ndim)
+            r_indexer[self.axis] = slice(None)
+            self.r = R[self.axis][tuple(r_indexer)]
+            if cuda_backend:
+                self.r = self.r.get()
+
+        if self.sum_axis is None:
+            self.sum_axis = tuple(k for k in range(R[0].ndim) if k != self.axis)
+
+        r_data = np.sum(np.abs(psi)**2, axis=self.sum_axis)
+
+        self.fig.clear()
+        self.fig.text(0, 0, 'Frame=%d' % (self.frame))
+
+        self.ax1 = self.fig.add_subplot(1, 1, 1)
+        if cuda_backend:
+            r_data = r_data.get()
+
+        for l in range(r_data.shape[-1]):
+            self.ax1.plot(self.r, r_data[..., l])
+
+        plt.draw()
+        plt.pause(0.01)
+
+

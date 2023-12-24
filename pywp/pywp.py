@@ -3,7 +3,7 @@ import numpy as np
 import itertools
 from .potential import Potential
 from .util import expm_batch, Grid
-from typing import Union, List
+from typing import Union, List, Callable
 
 def abs2(x):
     return (x * x.conj()).real
@@ -27,10 +27,10 @@ class PhysicalParameter:
         self.dt = dt
 
 
-def preprocess(potential:Union[Potential, np.ndarray], grid:Grid, wavepacket, c0:Union[int,float,complex], M:float, dt:float) -> PhysicalParameter:
-    """ Produce things needed for propatate(). Only two electronic states (potential.dim() == 2) are supported currently.
+def preprocess(potential:Union[Potential,np.ndarray,Callable[[List[np.ndarray]],np.ndarray]], grid:Grid, wavepacket, c0:Union[int,float,complex], M:float, dt:float) -> PhysicalParameter:
+    """ Produce things needed for propatate().
 
-    potential: potential.Potential or a (N1 x N2 x ... x Nel) numpy array.
+    potential: potential.Potential, an (N1 x N2 x ... x Nel) numpy array, or a callable that returns such array.
     grid: A grid instance specifying the actual grid.
     wavepacket: A (N1 x N2 x ... Nn) numpy array, or a function that returns such array by taking position (with size 
         List[array(N1 x ...)]) as the argument. Normalization is not required.
@@ -45,10 +45,14 @@ def preprocess(potential:Union[Potential, np.ndarray], grid:Grid, wavepacket, c0
         H = potential
         assert H.shape[-2] == H.shape[-1]
         assert H.shape[:-2] == grid.shape
-    else:
+    elif isinstance(potential, Potential):
         nel = potential.get_dim()
         nk = potential.get_kdim()
+        get_H = potential.get_H
         assert nk == grid.ndim
+    else:
+        get_H = potential
+        nk = grid.ndim
 
     # build K grid
     r = grid.build_individual()
@@ -63,6 +67,14 @@ def preprocess(potential:Union[Potential, np.ndarray], grid:Grid, wavepacket, c0
 
     R = np.meshgrid(*r, indexing='ij')
     K = np.meshgrid(*k, indexing='ij')
+    
+    # build H 
+    if not isinstance(potential, np.ndarray):
+        H = get_H(R)
+        if not isinstance(potential, Potential):
+            nel = H.shape[-1]
+
+    assert H.shape == tuple(grid.shape + (nel, nel))
     
     # build wavefunction
     Psi = np.zeros(grid.shape + (nel,), dtype=complex)
@@ -83,12 +95,6 @@ def preprocess(potential:Union[Potential, np.ndarray], grid:Grid, wavepacket, c0
             Psi[..., j] = psi0 * c[j]
 
     Psi /= np.sqrt(np.sum(abs2(Psi))* dA)
-
-    # build H 
-    if not isinstance(potential, np.ndarray):
-        H = potential.get_H(R)
-
-    assert H.shape == tuple(grid.shape + (nel, nel))
     assert Psi.shape == tuple(grid.shape + (nel,))
 
     # build exponential of operators
@@ -108,13 +114,13 @@ def propagate(para:PhysicalParameter, nstep:int, output_step:int, partitioner=No
    
     - nstep: Maximum number of steps.
     - output_step: Step to output info and save result.
-    - partitioner: None/list[list[array[float]]->array[bool]]. Each of the functions will be called by p(R), where R is position meshgrid, list with potential.dim() element of size N x N ...
+    - partitioner: (depracated) None/list[list[array[float]]->array[bool]]. Each of the functions will be called by p(R), where R is position meshgrid, list with potential.dim() element of size N x N ...
         it should return a boolean map (with size N x N ...). If None, a unit partitioner is used (just a number 1).
-    - partition_titles: list[str]. Titles for verbose output.
+    - partition_titles: (depracated) list[str]. Titles for verbose output.
     - analyzer: None/list[(R:list[array], K:list[array], psi:array, cuda_backend:bool)->any]. The analyzer will be called every output_step, and result will be stored in the returned variable.
     - fixes: None/list[(R, psi)->any]. Will be called every step (including t=0), and the result will be saved. Note that the propagation will be significantly slower, since
         twice calls of exp(-iV*dt/2) has to be invoked instead of a single call of exp(-iV*dt).
-    - trajfile: None/file-like. Will write wavefunction (on both position and momentum basis) to the file, ordered by electronic state. 
+    - trajfile: (depracated) None/file-like. Will write wavefunction (on both position and momentum basis) to the file, ordered by electronic state. 
         All positions first, followed by momentums.
     - checkend, checkend_rtol: If true, and sum(abs(boundary(R) * Psi)^2)) > 1 - checkend_rtol, then the simulation is terminated.
     - boundary: list[array[float]]->array[bool]. Return a bool map with shape equals to position grid where True means inside boundary. Invoked when checkend is true.

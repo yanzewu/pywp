@@ -241,3 +241,39 @@ def project_wavefunction(psi:np.ndarray, U:np.ndarray, inverse=False):
     else:
         return (U @ psi[..., None])[..., 0]
 
+def assemble_H(*args:np.ndarray, symmetric:bool=False, antiherm:bool=False) -> np.ndarray:
+    """ Assemble a nuclear-electronic Hamiltonian from individual elements on the electronic basis (e.g., V00,V01,...)
+    The order upper triangluar: 00->01->02->...->11->12->...
+    
+    symmetric: If two states, will assume V11 = -V00
+    antiherm: Will set Vkj = -Vjk.conj() instead of Vjk.conj()
+    """
+    N = len(args)
+    if N == 0:
+        return np.empty((0,0,0))
+    elif N == 1:
+        return args[0][:,None,None]
+    
+    _type = complex if any((isinstance(a, complex) or (isinstance(a, np.ndarray) and a.dtype == complex) for a in args)) else float
+    
+    if N == 2 and symmetric:
+        H = np.zeros((args[0].shape[0], 2, 2), dtype=_type)
+        H[:,0,0] = args[0]
+        H[:,0,1] = args[1]
+        H[:,1,1] = -args[0]
+        H[:,1,0] = H[:,0,1].conj() if not antiherm else -H[:,0,1].conj()
+        return H
+
+    # assume N = k*(k+1)/2
+    k = (2*N + 0.25)**0.5 - 0.5
+    assert int(k) == k, "Incorrect number of arguments"
+    k = int(k)
+
+    H = np.zeros((args[0].shape[0], k, k), dtype=_type)
+    for i, (p,q) in enumerate(zip(*np.triu_indices(k))):
+        H[:,p,q] = args[i]
+        H[:,q,p] = H[:,p,q].conj() if not antiherm else -H[:,p,q].conj()
+
+    return H
+
+

@@ -41,12 +41,14 @@ class Snapshots:
             p.append(np.fft.fftshift(np.fft.fftfreq(g, L/(g-1)))*2*np.pi)
         return np.meshgrid(*p, indexing='ij')
 
-    def get_snapshot(self, index:int, order:str='k', momentum=True, time=False):
+    def get_snapshot(self, index:int, order:str='k', momentum:bool=True, time:bool=False):
         """ Get a specific snapshot at index.
         index: integer less than len(Snapshots).
         order: e/k.
             k: Put kinetic dimensions at the beginning, shape will be like (nk1, nk2, ..., nel)
             e: Put electronic dimensions at the beginning, shape will be like (nel, nk1, nk2, ...)
+        momentum: Whether momentum is returned.
+        time: Whether time is returned.
         
         Returns:
             If momentum is set, will return (psiR, psiP), otherwise returns psiR only.
@@ -73,6 +75,10 @@ class Snapshots:
 
     def __len__(self):
         return len(self.data)
+    
+    def __getitem__(self, index:int):
+        return self.get_snapshot(index)
+
 
 
 def load_file(filename:str) -> Snapshots:
