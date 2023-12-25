@@ -241,7 +241,7 @@ def project_wavefunction(psi:np.ndarray, U:np.ndarray, inverse=False):
     else:
         return (U @ psi[..., None])[..., 0]
 
-def assemble_H(*args:np.ndarray, symmetric:bool=False, antiherm:bool=False) -> np.ndarray:
+def build_pe_tensor(*args:np.ndarray, symmetric:bool=False, antiherm:bool=False) -> np.ndarray:
     """ Assemble a nuclear-electronic Hamiltonian from individual elements on the electronic basis (e.g., V00,V01,...)
     The order upper triangluar: 00->01->02->...->11->12->...
     

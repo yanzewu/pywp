@@ -77,8 +77,44 @@ class Snapshots:
         return len(self.data)
     
     def __getitem__(self, index:int):
-        return self.get_snapshot(index)
+        return self.get_snapshot(index, momentum=False)
 
+class SnapshotWriter:
+
+    def __init__(self, filename:str):
+        self.filename = filename
+        self.file = None
+        self.record_count = 0
+
+    def __call__(self, para, checkpoint):
+        if not self.file:
+            self.file = open(self.filename, 'wb')
+            
+        for j in range(checkpoint.psiR.shape[-1]):
+            checkpoint.psiR[...,j].tofile(self.file)
+
+        for psip in checkpoint.psiK:
+            checkpoint.backend.fft.fftshift(psip).tofile(self.file)
+
+        self.record_count += 1
+
+        if self.record_count == 1:
+            self.t_last = checkpoint.time
+            self.dt = 1
+            self.box = [(r.flat[-1] - r.flat[0])/2 for r in para.R]
+            self.grid = para.R[0].shape
+            self.nel = checkpoint.psiR.shape[-1]
+        elif self.record_count == 2:
+            self.dt = checkpoint.time - self.t_last
+
+    def close(self):
+        if self.file:
+            self.file.close()
+            with open(self.filename + '.meta', 'w') as f:
+                f.write('-L %s -N %s -n %d -dt %f -step %d' % (
+                    ','.join((str(x) for x in self.box)),
+                    ','.join((str(x) for x in self.grid)),
+                    self.nel * 2, self.dt, self.record_count))
 
 
 def load_file(filename:str) -> Snapshots:

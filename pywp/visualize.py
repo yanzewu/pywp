@@ -547,25 +547,25 @@ class WavepacketDisplayer1D:
 
         #plt.ion()
 
-    def __call__(self, R, K, psi, cuda_backend):
+    def __call__(self, para, checkpoint):
         
         if self.r is None:
-            r_indexer = [0]*(R[0].ndim)
+            r_indexer = [0]*(para.R[0].ndim)
             r_indexer[self.axis] = slice(None)
-            self.r = R[self.axis][tuple(r_indexer)]
-            if cuda_backend:
+            self.r = para.R[self.axis][tuple(r_indexer)]
+            if checkpoint.backend.__name__ == 'cupy':
                 self.r = self.r.get()
 
         if self.sum_axis is None:
-            self.sum_axis = tuple(k for k in range(R[0].ndim) if k != self.axis)
+            self.sum_axis = tuple(k for k in range(para.R[0].ndim) if k != self.axis)
 
-        r_data = np.sum(np.abs(psi)**2, axis=self.sum_axis)
+        r_data = np.sum(np.abs(checkpoint.psiR)**2, axis=self.sum_axis)
 
         self.fig.clear()
         self.fig.text(0, 0, 'Frame=%d' % (self.frame))
 
         self.ax1 = self.fig.add_subplot(1, 1, 1)
-        if cuda_backend:
+        if checkpoint.backend.__name__ == 'cupy':
             r_data = r_data.get()
 
         for l in range(r_data.shape[-1]):

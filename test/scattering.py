@@ -5,7 +5,7 @@ import unittest
 sys.path.append('..')
 from pywp.scattering.impl import scatter1d
 from pywp import mgrid
-from pywp.util import assemble_H
+from pywp.util import build_pe_tensor
 from pywp.potential.test import Tully1_1D
 
 
@@ -57,12 +57,12 @@ class TestScattering(unittest.TestCase):
 
     def test_coherent(self):
         print('Testing coherent')
-        H = lambda R: assemble_H(np.ones_like(R[0])*1e-5, 0.01, symmetric=True)
+        H = lambda R: build_pe_tensor(np.ones_like(R[0])*1e-5, 0.01, symmetric=True)
         self.assertDictAlmostEqual(scatter1d(H, mgrid[-5:5:124j], 1000, 0.02, [0.5**0.5, 0.5**0.5], adiabatic_boundary=True)[0], {'left':[0,0], 'right':[0,1]})
 
     def test_tully3(self):
         print('Testing tully3')
-        self.assertDictAlmostEqual(scatter1d(lambda R: assemble_H(
+        self.assertDictAlmostEqual(scatter1d(lambda R: build_pe_tensor(
                                     6e-4*np.ones_like(R[0]), 
                                     0.1*np.exp(0.9*R[0]) * (R[0] < 0) + 0.1 * (2 - np.exp(-0.9*R[0])) * (R[0] >= 0),
                                     symmetric=True), 
@@ -78,10 +78,10 @@ class TestScattering(unittest.TestCase):
         A = 0.01
         B = 1.6
         C = 0.005
-        dHdR = assemble_H(A*B*np.exp(-np.abs(B*R[0])),-2*R[0]*C*np.exp(-R[0]**2), symmetric=True)
+        dHdR = build_pe_tensor(A*B*np.exp(-np.abs(B*R[0])),-2*R[0]*C*np.exp(-R[0]**2), symmetric=True)
         dHdR_ad = np.transpose(U, (0,2,1)) @ dHdR @ U
-        D = assemble_H(np.zeros_like(R[0]), np.abs(dHdR_ad[:,0,1]) / (E[:,1]-E[:,0]), symmetric=True, antiherm=True)
-        Emat = assemble_H(E[:,0], 0, E[:,1])
+        D = build_pe_tensor(np.zeros_like(R[0]), np.abs(dHdR_ad[:,0,1]) / (E[:,1]-E[:,0]), symmetric=True, antiherm=True)
+        Emat = build_pe_tensor(E[:,0], 0, E[:,1])
         self.assertDictAlmostEqual(scatter1d(Emat, grid, 2000, 0.1, 0, side='both', incoming_side='left', drvcoupling=D)[0], {'left':[0,0], 'right':[0.51,0.49]})
 
 
