@@ -9,6 +9,8 @@ from ..util import Grid
 from ..potential import Potential
 from ..fd import drv_kernel, drv_matrix
 
+from .itersolv import itersolv
+
 @dataclasses.dataclass(eq=False)
 class Channel:
     edge: int                                   # 0/-1
@@ -22,7 +24,7 @@ class Channel:
 def scatter1d(potential:Union[Potential,np.ndarray,Callable[[list[np.ndarray]],np.ndarray]], grid:Grid, M:float, KE:float, 
               incoming_state:Union[float,int,np.ndarray], incoming_side:str='left', 
               *, drvcoupling:Union[None,np.ndarray,Callable[[list[np.ndarray]],np.ndarray]]=None, side:str='both', KE_accuracy:int=2, 
-              adiabatic_boundary:bool=False, grid_warn_fraction:int=4) -> Tuple[dict, np.ndarray]:
+              adiabatic_boundary:bool=False, grid_warn_fraction:int=4, itersolver=None, itersolve_kwargs={}) -> Tuple[dict, np.ndarray]:
     """ Solves scattering problem in 1D.
 
     potential: An (Ngrid x Nel x Nel) numpy array, or an `Potential` instance.
@@ -37,6 +39,11 @@ def scatter1d(potential:Union[Potential,np.ndarray,Callable[[list[np.ndarray]],n
         $|n_A> \otimes e^{ik_A R} $ (where $|n_A>$ are adiabatic states) as basis, and will use off-diagonal elements 
         to calculate energies. Otherwise, only diagonal elements of the Hamiltonian is used.
     grid_warn_fraction: How many grids span a period of wave, before triggers the warning. The smaller, more frequent the warning.
+    itersolver: Using iterative solver. By default applies to matrix size > 1000.
+    itersolve_kwargs: Additional arguments passed to itersolver.
+        - maxiter: Maximum iteration (defaults to 500);
+        - atol, rtol: Tolerence (defaults to 1e-8);
+        - x0: Initial guess of solution;
     
     Returns: {side: probability}, wavefunction, (optional) {side: basis}
         side: 'left' or 'right'.
@@ -73,6 +80,7 @@ def scatter1d(potential:Union[Potential,np.ndarray,Callable[[list[np.ndarray]],n
     else:
         D = None
 
+    real_valued = D is None and V.dtype == float
 
     nel = V.shape[1]
     N = len(R)
@@ -107,7 +115,7 @@ def scatter1d(potential:Union[Potential,np.ndarray,Callable[[list[np.ndarray]],n
     if adiabatic_boundary:
         Etot = np.vdot(ampl_inc, V[incoming_channel.edge] @ ampl_inc) + KE
     else:
-        Etot = np.vdot(ampl_inc, np.diag(V[incoming_channel.edge]) * ampl_inc) + KE
+        Etot = np.vdot(ampl_inc, np.real(np.diag(V[incoming_channel.edge])) * ampl_inc) + KE
 
     # Set the filters
     offset = 0
@@ -116,7 +124,7 @@ def scatter1d(potential:Union[Potential,np.ndarray,Callable[[list[np.ndarray]],n
             E_edge, U_edge = np.linalg.eigh(V[c.edge])
             KE_local = Etot - E_edge
         else:
-            KE_local = Etot - np.diag(V[c.edge])
+            KE_local = Etot - np.real(np.diag(V[c.edge]))
             U_edge = np.eye(nel, nel)
 
         c.offset = offset
@@ -135,10 +143,12 @@ def scatter1d(potential:Union[Potential,np.ndarray,Callable[[list[np.ndarray]],n
     # ========== cols of H ==========
     # | [channel 0] nel0, nel1, ... , len(channel0.wavevector) | (@channel1.offset) [channel 1] nel0, ... | (@offset_wf) [x]
 
-    H_grid_grid = np.zeros((nel, N, nel, N), dtype=complex)
+
     H_bra_grid = np.zeros((offset_wf, nel, N), dtype=complex)
     H_grid_ket = np.zeros((nel, N, offset_wf), dtype=complex)
     H_bra_ket = np.zeros((offset_wf, offset_wf), dtype=complex)
+    H_grid_grid = [[np.zeros((N, N), dtype=float if real_valued else complex) for k in range(nel)] for j in range(nel)]
+    # H_grid_grid is special: in this way we can remove it easily from memory.
     
     T_mat = -drv_matrix(N, 2, accuracy=KE_accuracy) / (2*M*dx**2)
     T_kernel = -drv_kernel(2, KE_accuracy) / (2*M*dx**2)
@@ -148,13 +158,13 @@ def scatter1d(potential:Union[Potential,np.ndarray,Callable[[list[np.ndarray]],n
 
     for j in range(nel):
         for k in range(nel):
-            H_grid_grid[j,:,k,:].flat[::N+1] = V[:,j,k] # equivalent to fill diagonal
+            H_grid_grid[j][k].flat[::N+1] = V[:,j,k] # equivalent to fill diagonal
             if D is not None:
                 djk_v = D[:,j,k][:,None] * halfv_mat # equivalent to diag(D) @ v_mat
-                H_grid_grid[j,:,k,:] += djk_v - djk_v.T
-                H_grid_grid[j,:,k,:].flat[::N+1] -= D2[:,j,k]
+                H_grid_grid[j][k] += djk_v - djk_v.T
+                H_grid_grid[j][k].flat[::N+1] -= D2[:,j,k]
                 
-        H_grid_grid[j,:,j,:] += T_mat
+        H_grid_grid[j][j] += T_mat
 
     # sides
     x_segment = np.arange(KE_accuracy+1) * dx   # the basis of incoming/outgoing wave. There is only one of them corresponding
@@ -199,16 +209,33 @@ def scatter1d(potential:Union[Potential,np.ndarray,Callable[[list[np.ndarray]],n
         
     # build the matrices
     H = np.empty((offset_wf + N*nel, offset_wf + N*nel), dtype=complex)
+    
+    # in this way we make use of COW. note we have to use reverse order because of del
+    for j in range(nel-1, -1, -1):
+        for k in range(nel-1, -1, -1):
+            H[offset_wf+j*N:offset_wf+(j+1)*N, offset_wf+k*N:offset_wf+(k+1)*N] = H_grid_grid[j][k]
+            del H_grid_grid[j][k]
+
     H[:offset_wf, :offset_wf] = H_bra_ket
     H[:offset_wf, offset_wf:] = H_bra_grid.reshape(offset_wf, N*nel)
     H[offset_wf:, :offset_wf] = H_grid_ket.reshape(N*nel, offset_wf)
-    H[offset_wf:, offset_wf:] = H_grid_grid.reshape(N*nel, N*nel)
     H.flat[np.arange(0, H.size, len(H)+1)] -= Etot
 
     psi_inc = np.concatenate((psi_inc_bra, psi_inc_grid.flatten()))
     psi_inc[incoming_channel.offset:incoming_channel.offset+incoming_channel.size] -= Etot * ampl_inc_proj
 
-    psi = -np.linalg.solve(H, psi_inc)
+    if itersolver is None:
+        itersolver = H.shape[0] > 1000
+
+    if not itersolver:
+        psi = -np.linalg.solve(H, psi_inc)
+
+    else:
+        H_kernel = [H[:offset_wf, :offset_wf]]
+        for j in range(nel):
+            H_kernel.append(H[offset_wf+j*N:offset_wf+(j+1)*N,offset_wf+j*N:offset_wf+(j+1)*N])
+        
+        psi = -itersolv(H, psi_inc, H_kernel, adapt_scattering=True, **itersolve_kwargs)
 
     prob = {}
     basis = {}
