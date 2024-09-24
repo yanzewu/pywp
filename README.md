@@ -51,6 +51,11 @@ Here is an example of running Tully1:
 
     snapshot_writer = pywp.snapshot.SnapshotWriter('tully1.snapshot')
 
+There are also a few tools to assist the calculation: 
+- `pywp.snapshot.SnapshotWriter()` writes the snapshots;
+- `pywp.expec` calculates the expectation value of a few operators (population, position, momentum, etc.);
+- `pywp.visualize.WavepacketDisplayer1D()` displays the wavepackets while running.
+
 (4) Do the propagation:
 
     pywp.propagate(para, 

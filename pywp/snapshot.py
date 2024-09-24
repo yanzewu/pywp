@@ -93,8 +93,8 @@ class SnapshotWriter:
         for j in range(checkpoint.psiR.shape[-1]):
             checkpoint.psiR[...,j].tofile(self.file)
 
-        for psip in checkpoint.psiK:
-            checkpoint.backend.fft.fftshift(psip).tofile(self.file)
+        for j in range(checkpoint.psiK.shape[-1]):
+            checkpoint.backend.fft.fftshift(checkpoint.psiK[...,j]).tofile(self.file)
 
         self.record_count += 1
 

@@ -21,10 +21,11 @@ pp = pywp.preprocess(tully1, grid, wavepacket=lambda R: np.exp(-(R[0]+5)**2 + 1j
 displayer = pywp.visualize.WavepacketDisplayer1D()
 writer = pywp.snapshot.SnapshotWriter('traj-tully1-p20.trj')
 populations = []
+pop_trans = pywp.expec.PositionFunc(lambda R: R[0] > 0, normalization='none')
 
 pywp.propagate(pp, nstep=12000, output_step=1000, 
                          on_output=[
-                             lambda para, cp: populations.append(np.sum(np.abs(cp.psiR)**2 * (para.R[0] > 0)[...,None], axis=0) * para.dA),
+                             lambda para, cp: populations.append(pop_trans(para, cp)),
                              displayer,
                              writer
                          ],
@@ -44,4 +45,4 @@ for j in range(len(snapshots)):
     print('At snapshot {}, state populations = '.format(j), np.sum(np.abs(s)**2 * (R[0] > 0)[...,None], axis=0) / np.sum(np.abs(s)**2))
 
 
-pywp.visualize.visualize_snapshot_1d(snapshots)
+# pywp.visualize.visualize_snapshot_1d(snapshots)

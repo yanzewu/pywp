@@ -173,8 +173,6 @@ class Application:
             output_step=args.output_step,
             partitioner=self.partitioner,
             partition_titles=self.partition_titles,
-            analyzer=self.analyzer,
-            trajfile=trajfile,
             checkend=args.checkend,
             boundary=self.boundary,
             verbose=args.output,
